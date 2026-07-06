@@ -131,3 +131,25 @@
     @apply font-sans;
   }
 }
+
+/* Sign-in hero blob animations */
+@keyframes hero-blob {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(30px, -20px) scale(1.05); }
+  66% { transform: translate(-15px, 15px) scale(0.95); }
+}
+@keyframes hero-blob-delayed {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(-25px, 20px) scale(1.08); }
+  66% { transform: translate(20px, -10px) scale(0.92); }
+}
+@keyframes hero-blob-slow {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.15); }
+}
+
+@theme inline {
+  --animate-hero-blob: hero-blob 12s ease-in-out infinite;
+  --animate-hero-blob-delayed: hero-blob-delayed 14s ease-in-out infinite;
+  --animate-hero-blob-slow: hero-blob-slow 18s ease-in-out infinite;
+}

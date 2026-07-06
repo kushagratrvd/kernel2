@@ -12,11 +12,12 @@ import { env } from "@/env";
 const createContext = async (req: NextRequest) => {
     return createTRPCContext({
         headers: req.headers,
+        req,
     });
 };
 
 const handler = (req: NextRequest) => {
-    fetchRequestHandler({
+    return fetchRequestHandler({
         endpoint: "api/trpc",
         req,
         router: appRouter,

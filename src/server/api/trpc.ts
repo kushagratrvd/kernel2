@@ -6,11 +6,13 @@
  * TL;DR - This is where all the tRPC server stuff is created and plugged in. The pieces you will
  * need to use are documented accordingly near the end.
  */
-import { initTRPC } from "@trpc/server";
+import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
+import { type NextRequest } from "next/server";
 
 import { db } from "@/db";
+import { auth } from "@/lib/auth"; 
 
 /**
  * 1. CONTEXT
@@ -24,10 +26,19 @@ import { db } from "@/db";
  *
  * @see https://trpc.io/docs/server/context
  */
-export const createTRPCContext = async (opts: { headers: Headers }) => {
+export const createTRPCContext = async (opts: { 
+  headers: Headers;
+  req?: NextRequest;
+ }) => {
+  // Get session from Better Auth using the headers
+  const session = await auth.api.getSession({
+    headers: opts.headers,
+  });
+
   return {
     db,
-    ...opts,
+    session,
+    headers: opts.headers,
   };
 };
 
@@ -96,6 +107,22 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
   return result;
 });
 
+// Auth Middleware checks if user is logged in
+const authMiddleware = t.middleware(({ ctx, next }) => {
+  if (!ctx.session?.user) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "You must be logged in to perform this action",
+    });
+  }
+  return next({
+    ctx: {
+      session: ctx.session,
+      user: ctx.session.user,
+    },
+  });
+})
+
 /**
  * Public (unauthenticated) procedure
  *
@@ -105,4 +132,6 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
  */
 export const publicProcedure = t.procedure.use(timingMiddleware);
 
-export const protectedProcedure = t.procedure.use(timingMiddleware);
+export const protectedProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(authMiddleware);
