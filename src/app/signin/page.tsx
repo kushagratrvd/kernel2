@@ -48,7 +48,8 @@ export default function SignIn() {
       if (result.error) {
         setError(result.error.message ?? "Invalid email or password.");
       } else {
-        router.push("/dashboard");
+        if(result.data.user.role === "student") router.push("/contest");
+        else if(result.data.user.role === "admin") router.push("/dashboard");
       }
     } catch {
       setError("Something went wrong. Please try again.");

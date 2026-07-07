@@ -11,8 +11,8 @@ import superjson from "superjson";
 import { ZodError } from "zod";
 import { type NextRequest } from "next/server";
 
-import { db } from "@/db";
-import { auth } from "@/lib/auth"; 
+import { db } from "@/server/db";
+import { auth } from "@/server/auth"; 
 
 /**
  * 1. CONTEXT
@@ -123,6 +123,21 @@ const authMiddleware = t.middleware(({ ctx, next }) => {
   });
 })
 
+const adminMiddleware = t.middleware(({ ctx, next }) => {
+    if (ctx.session?.user?.role !== "admin") {
+        throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "You must be logged in as an admin to perform this action",
+        });
+    }
+    return next({
+        ctx: {
+            session: ctx.session,
+            user: ctx.session.user,
+        },
+    });
+})
+
 /**
  * Public (unauthenticated) procedure
  *
@@ -135,3 +150,8 @@ export const publicProcedure = t.procedure.use(timingMiddleware);
 export const protectedProcedure = t.procedure
   .use(timingMiddleware)
   .use(authMiddleware);
+
+export const adminProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(authMiddleware)
+  .use(adminMiddleware);
