@@ -109,7 +109,15 @@ export default function ContestDetailPage({
               </div>
               <p className="text-sm text-muted-foreground max-w-xl">{contestData.description || "No description provided."}</p>
             </div>
-            <div className="flex flex-wrap gap-2">
+             <div className="flex flex-wrap gap-2">
+              <Button 
+                onClick={() => router.push(`/dashboard/contests/${contestId}/edit`)}
+                variant="outline"
+                className="gap-2 rounded-2xl"
+              >
+                <HugeiconsIcon icon={Edit01Icon} className="size-4" />
+                Edit Settings
+              </Button>
               <Button 
                 onClick={() => router.push(`/dashboard/contests/${contestId}/questions/new`)}
                 className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 transition-all rounded-2xl"

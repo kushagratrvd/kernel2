@@ -1,6 +1,6 @@
 "use client";
 
-import { use } from "react";
+import { use, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useTRPC } from "@/trpc/client";
@@ -64,8 +64,13 @@ export default function ContestCoverPage({
   const { contest, participation } = data;
 
   // If already finished, redirect to results page
+  useEffect(() => {
+    if (participation?.finishedAt) {
+      router.push(`/contest/${code}/results`);
+    }
+  }, [participation?.finishedAt, code, router]);
+
   if (participation?.finishedAt) {
-    router.push(`/contest/${code}/results`);
     return null;
   }
 

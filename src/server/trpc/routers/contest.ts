@@ -1,7 +1,7 @@
 import { createTRPCRouter, protectedProcedure, adminProcedure } from "../init";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { contest, contestParticipation, question, testCase, submission } from "@/server/db/contest-schema";
 import { executeSubmission, checkOutputsMatch } from "@/server/codebox";
 
@@ -825,5 +825,49 @@ export const contestRouter = createTRPCRouter({
         .where(eq(contest.id, origQuestion.contestId));
 
       return { success: true };
+    }),
+
+  // Update contest
+  update: adminProcedure
+    .input(z.object({
+      id: z.string().min(1),
+      code: z.string().min(1),
+      title: z.string().min(1),
+      description: z.string().optional().nullable(),
+      coverImageUrl: z.string().optional().nullable(),
+      startTime: z.coerce.date(),
+      endTime: z.coerce.date(),
+      totalTime: z.number().min(1),
+      isActive: z.boolean(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { id, ...updateData } = input;
+
+      // Check if another contest uses the same code
+      const existing = await ctx.db.query.contest.findFirst({
+        where: and(
+          eq(contest.code, updateData.code.trim().toUpperCase()),
+          ne(contest.id, id)
+        ),
+      });
+
+      if (existing) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "A contest with this code already exists.",
+        });
+      }
+
+      const [updatedContest] = await ctx.db
+        .update(contest)
+        .set({
+          ...updateData,
+          code: updateData.code.trim().toUpperCase(),
+          duration: updateData.totalTime,
+        })
+        .where(eq(contest.id, id))
+        .returning();
+
+      return updatedContest;
     }),
 });

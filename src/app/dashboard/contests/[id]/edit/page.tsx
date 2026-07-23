@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useTRPC } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,11 +12,22 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowLeft01Icon, AddCircleIcon } from "@hugeicons/core-free-icons";
+import { ArrowLeft01Icon, Edit01Icon, AlertCircleIcon } from "@hugeicons/core-free-icons";
 
-export default function NewContestPage() {
+export default function EditContestPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const router = useRouter();
   const trpc = useTRPC();
+  const resolvedParams = use(params);
+  const contestId = resolvedParams.id;
+
+  // Query contest details
+  const { data: contestData, isLoading, error } = useQuery(
+    trpc.contest.getForEdit.queryOptions({ id: contestId }),
+  );
 
   // Form State
   const [title, setTitle] = useState("");
@@ -28,6 +39,28 @@ export default function NewContestPage() {
   const [totalTime, setTotalTime] = useState(60);
   const [isActive, setIsActive] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+
+  // Load existing contest data
+  useEffect(() => {
+    if (contestData) {
+      setTitle(contestData.title);
+      setCode(contestData.code);
+      setDescription(contestData.description || "");
+      setCoverImageUrl(contestData.coverImageUrl || "");
+      
+      // format Date objects to YYYY-MM-DDTHH:mm for datetime-local input
+      const formatDateTime = (dateVal: Date | string | number) => {
+        const d = new Date(dateVal);
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      };
+
+      setStartTime(formatDateTime(contestData.startTime));
+      setEndTime(formatDateTime(contestData.endTime));
+      setTotalTime(contestData.totalTime);
+      setIsActive(contestData.isActive);
+    }
+  }, [contestData]);
 
   // Automatically calculate duration (totalTime) when startTime or endTime changes
   useEffect(() => {
@@ -41,7 +74,7 @@ export default function NewContestPage() {
     }
   }, [startTime, endTime]);
 
-  const createContestMutation = useMutation(trpc.contest.create.mutationOptions());
+  const updateContestMutation = useMutation(trpc.contest.update.mutationOptions());
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,23 +86,44 @@ export default function NewContestPage() {
     }
 
     try {
-      await createContestMutation.mutateAsync({
+      await updateContestMutation.mutateAsync({
+        id: contestId,
         title,
         code: code.trim().toUpperCase(),
-        description: description || undefined,
-        coverImageUrl: coverImageUrl || undefined,
+        description: description || null,
+        coverImageUrl: coverImageUrl || null,
         startTime: new Date(startTime),
         endTime: new Date(endTime),
         totalTime: Number(totalTime),
         isActive,
       });
 
-      router.push("/dashboard");
+      router.push(`/dashboard/contests/${contestId}`);
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err.message || "Failed to create contest. Ensure the code is unique.");
+      setErrorMsg(err.message || "Failed to update contest. Ensure the code is unique.");
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Spinner className="size-8" />
+      </div>
+    );
+  }
+
+  if (error || !contestData) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center p-6 text-center">
+        <HugeiconsIcon icon={AlertCircleIcon} className="size-12 text-destructive animate-bounce" />
+        <h2 className="text-xl font-bold mt-4">Contest Not Found</h2>
+        <Button onClick={() => router.push("/dashboard")} className="mt-4 rounded-xl">
+          Back to Dashboard
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="relative flex min-h-screen flex-col bg-background">
@@ -79,7 +133,7 @@ export default function NewContestPage() {
       <header className="sticky top-0 z-50 flex items-center justify-between border-b border-border/40 bg-background/85 px-6 py-4 backdrop-blur-md">
         <div className="flex items-center gap-3">
           <Button 
-            onClick={() => router.push("/dashboard")} 
+            onClick={() => router.push(`/dashboard/contests/${contestId}`)} 
             variant="ghost" 
             size="sm" 
             className="gap-1 rounded-xl"
@@ -88,7 +142,7 @@ export default function NewContestPage() {
             Back
           </Button>
           <span className="text-base font-semibold tracking-tight text-foreground">
-            Create Contest
+            Edit Contest Settings
           </span>
         </div>
       </header>
@@ -97,8 +151,8 @@ export default function NewContestPage() {
       <main className="flex-1 p-6 lg:p-10 max-w-3xl mx-auto w-full">
         <div className="rounded-3xl border border-border/40 bg-card p-6 lg:p-8 shadow-sm backdrop-blur-md space-y-6">
           <div>
-            <h1 className="text-2xl font-black">Contest Details</h1>
-            <p className="text-sm text-muted-foreground">Setup the basic properties of the new coding contest.</p>
+            <h1 className="text-2xl font-black">Edit Contest</h1>
+            <p className="text-sm text-muted-foreground">Modify the properties, duration, scheduling and status of the contest.</p>
           </div>
 
           <Separator />
@@ -218,20 +272,20 @@ export default function NewContestPage() {
               <Button 
                 type="button" 
                 variant="outline" 
-                onClick={() => router.push("/dashboard")}
+                onClick={() => router.push(`/dashboard/contests/${contestId}`)}
                 className="rounded-2xl px-6"
               >
                 Cancel
               </Button>
               <Button 
                 type="submit" 
-                disabled={createContestMutation.isPending}
+                disabled={updateContestMutation.isPending}
                 className="rounded-2xl bg-primary text-primary-foreground px-6 gap-2"
               >
-                {createContestMutation.isPending ? <Spinner className="size-4" /> : (
+                {updateContestMutation.isPending ? <Spinner className="size-4" /> : (
                   <>
-                    <HugeiconsIcon icon={AddCircleIcon} className="size-4" />
-                    Create Contest
+                    <HugeiconsIcon icon={Edit01Icon} className="size-4" />
+                    Save Changes
                   </>
                 )}
               </Button>

@@ -100,21 +100,25 @@ export default function ContestAttemptPage({
     const durationMs = contest.totalTime * 60 * 1000;
     const endTime = startTime + durationMs;
 
+    let timerInterval: ReturnType<typeof setInterval> | undefined;
+
     const updateTimer = () => {
       const now = new Date().getTime();
       const remainingSeconds = Math.max(0, Math.floor((endTime - now) / 1000));
       setTimeLeft(remainingSeconds);
 
       if (remainingSeconds <= 0) {
-        clearInterval(timerInterval);
+        if (timerInterval) clearInterval(timerInterval);
         handleAutoSubmit();
       }
     };
 
     updateTimer();
-    const timerInterval = setInterval(updateTimer, 1000);
+    timerInterval = setInterval(updateTimer, 1000);
 
-    return () => clearInterval(timerInterval);
+    return () => {
+      if (timerInterval) clearInterval(timerInterval);
+    };
   }, [participation, contest]);
 
   // 3. Load previous submissions and merge with local storage draft
