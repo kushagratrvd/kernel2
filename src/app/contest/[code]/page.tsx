@@ -127,7 +127,7 @@ export default function ContestCoverPage({
 
           <div className="p-8 space-y-6">
             <div className="space-y-3">
-              <span className="inline-flex items-center rounded-full bg-chart-1/10 px-3 py-1 text-xs font-semibold text-chart-1">
+              <span className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
                 Code: {contest.code}
               </span>
               <h1 className="text-3xl font-extrabold tracking-tight">{contest.title}</h1>

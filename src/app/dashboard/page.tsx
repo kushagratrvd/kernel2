@@ -114,7 +114,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="rounded-3xl border border-border/40 bg-card p-6 shadow-sm backdrop-blur-md space-y-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-chart-1/10 text-chart-1">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <HugeiconsIcon icon={UserGroupIcon} className="size-5" />
             </div>
             <div>

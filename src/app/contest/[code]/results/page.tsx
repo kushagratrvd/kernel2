@@ -138,9 +138,9 @@ export default function ResultsPage({
               </div>
             </div>
 
-            <div className="rounded-2xl bg-chart-1/5 border border-chart-1/10 p-4 text-xs text-chart-1 space-y-1">
+            <div className="rounded-2xl bg-foreground/5 border border-foreground/10 p-4 text-xs text-foreground space-y-1">
               <div className="flex items-center gap-1.5 justify-center font-semibold">
-                <HugeiconsIcon icon={Tick02Icon} className="size-4" />
+                <HugeiconsIcon icon={Tick02Icon} className="size-4 text-foreground" />
                 <span>Submitted Successfully</span>
               </div>
               <p className="text-muted-foreground text-center">
@@ -154,7 +154,7 @@ export default function ResultsPage({
         <section className="space-y-4 lg:col-span-3">
           <div className="rounded-3xl border border-border/40 bg-card p-6 shadow-2xl backdrop-blur-xl dark:bg-card/50 space-y-6">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-chart-1/10 text-chart-1">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
                 <HugeiconsIcon icon={RankingIcon} className="size-5" />
               </div>
               <div>

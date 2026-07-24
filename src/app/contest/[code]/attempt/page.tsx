@@ -869,7 +869,7 @@ export default function ContestAttemptPage({
                       ? "bg-green-500/10 text-green-600 border border-green-500/35"
                       : "bg-red-500/10 text-red-500 border border-red-500/35";
                   } else {
-                    borderBgClass = "bg-chart-1/10 text-chart-1 border border-chart-1/25";
+                    borderBgClass = "bg-primary/10 text-primary border border-primary/20";
                   }
                 }
 
@@ -901,7 +901,7 @@ export default function ContestAttemptPage({
               </div>
               <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                 <div
-                  className="h-full bg-chart-1 transition-all duration-300"
+                  className="h-full bg-primary transition-all duration-300"
                   style={{
                     width: `${(questions.filter(q => isQuestionAnswered(q.id)).length / questions.length) * 100}%`,
                   }}
@@ -914,7 +914,7 @@ export default function ContestAttemptPage({
             {/* Sidebar Details / Legend */}
             <div className="space-y-2.5 text-2xs text-muted-foreground font-semibold">
               <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded bg-chart-1/25 border border-chart-1/50" />
+                <span className="h-2 w-2 rounded bg-primary/20 border border-primary/40" />
                 <span>MCQ/Text Answer Saved</span>
               </div>
               <div className="flex items-center gap-2">
@@ -933,7 +933,7 @@ export default function ContestAttemptPage({
             <Button
               onClick={submitContest}
               disabled={isSubmitting}
-              className="w-full rounded-2xl bg-chart-1 text-white hover:bg-chart-1/90 font-bold transition-all gap-1.5 h-11"
+              className="w-full rounded-2xl bg-foreground text-background hover:bg-foreground/90 font-bold transition-all gap-1.5 h-11"
             >
               {isSubmitting ? <Spinner className="size-4" /> : (
                 <>
