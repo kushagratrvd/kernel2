@@ -20,6 +20,8 @@ import {
   AlertCircleIcon,
 } from "@hugeicons/core-free-icons";
 
+import { ModeToggle } from "@/components/ui/mode-toggle";
+
 export default function SignIn() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -60,6 +62,9 @@ export default function SignIn() {
 
   return (
     <div className="relative flex min-h-screen w-full">
+      <div className="absolute right-6 top-6 z-50">
+        <ModeToggle />
+      </div>
       {/* Left panel — decorative hero */}
       <div className="relative hidden w-1/2 overflow-hidden lg:flex">
         {/* Animated gradient background */}
@@ -95,7 +100,7 @@ export default function SignIn() {
             <h1 className="text-4xl font-bold leading-tight tracking-tight text-foreground">
               Welcome back to
               <br />
-              <span className="bg-gradient-to-r from-chart-1 to-chart-3 bg-clip-text text-transparent">
+              <span className="text-primary">
                 Kernel Platform
               </span>
             </h1>

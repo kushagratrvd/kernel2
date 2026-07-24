@@ -14,6 +14,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft01Icon, Edit01Icon, AlertCircleIcon } from "@hugeicons/core-free-icons";
 
+import { ModeToggle } from "@/components/ui/mode-toggle";
+
 export default function EditContestPage({
   params,
 }: {
@@ -144,6 +146,9 @@ export default function EditContestPage({
           <span className="text-base font-semibold tracking-tight text-foreground">
             Edit Contest Settings
           </span>
+        </div>
+        <div className="flex items-center gap-4">
+          <ModeToggle />
         </div>
       </header>
 

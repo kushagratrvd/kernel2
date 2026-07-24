@@ -19,6 +19,8 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 
+import { ModeToggle } from "@/components/ui/mode-toggle";
+
 export default function DashboardPage() {
   const router = useRouter();
   const trpc = useTRPC();
@@ -68,6 +70,7 @@ export default function DashboardPage() {
           <span className="text-xs font-semibold text-muted-foreground uppercase">
             Admin: {session?.user?.name || "Organizer"}
           </span>
+          <ModeToggle />
           <Button variant="ghost" size="sm" onClick={handleSignOut} className="gap-2">
             <HugeiconsIcon icon={Logout01Icon} className="size-4" />
             Sign out

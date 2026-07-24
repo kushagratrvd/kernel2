@@ -19,6 +19,8 @@ import {
   AlertCircleIcon,
 } from "@hugeicons/core-free-icons";
 
+import { ModeToggle } from "@/components/ui/mode-toggle";
+
 export default function ContestDetailPage({
   params,
 }: {
@@ -88,6 +90,9 @@ export default function ContestDetailPage({
           <span className="text-base font-semibold tracking-tight text-foreground">
             Manage Contest
           </span>
+        </div>
+        <div className="flex items-center gap-4">
+          <ModeToggle />
         </div>
       </header>
 

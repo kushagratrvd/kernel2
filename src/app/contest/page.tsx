@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowRight01Icon, KeyIcon, Logout01Icon } from "@hugeicons/core-free-icons";
 
+import { ModeToggle } from "@/components/ui/mode-toggle";
+
 export default function ContestPage() {
   const router = useRouter();
   const [code, setCode] = useState("");
@@ -42,10 +44,13 @@ export default function ContestPage() {
             Kernel
           </span>
         </div>
-        <Button variant="ghost" size="sm" onClick={handleSignOut} className="gap-2">
-          <HugeiconsIcon icon={Logout01Icon} className="size-4" />
-          Sign out
-        </Button>
+        <div className="flex items-center gap-2">
+          <ModeToggle />
+          <Button variant="ghost" size="sm" onClick={handleSignOut} className="gap-2">
+            <HugeiconsIcon icon={Logout01Icon} className="size-4" />
+            Sign out
+          </Button>
+        </div>
       </header>
 
       {/* Code Entry Card */}

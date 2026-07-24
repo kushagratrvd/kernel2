@@ -16,6 +16,8 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 
+import { ModeToggle } from "@/components/ui/mode-toggle";
+
 export default function ResultsPage({
   params,
 }: {
@@ -90,7 +92,7 @@ export default function ResultsPage({
         <div className="text-sm font-semibold tracking-wider text-muted-foreground uppercase">
           Contest Finished
         </div>
-        <div className="w-16" />
+        <ModeToggle />
       </header>
 
       {/* Main content grid */}

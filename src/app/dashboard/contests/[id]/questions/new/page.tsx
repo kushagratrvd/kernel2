@@ -30,6 +30,8 @@ const DEFAULT_STARTER_CODES = {
   "62": `import java.util.Scanner;\n\npublic class Main {\n    public static void main(String[] args) {\n        // Modify this to solve the challenge\n        Scanner scanner = new Scanner(System.in);\n        if (scanner.hasNext()) {\n            String name = scanner.next();\n            System.out.println("Hello, " + name + "!");\n        }\n        scanner.close();\n    }\n}`
 };
 
+import { ModeToggle } from "@/components/ui/mode-toggle";
+
 export default function NewQuestionPage({
   params,
 }: {
@@ -168,6 +170,9 @@ export default function NewQuestionPage({
           <span className="text-base font-semibold tracking-tight text-foreground">
             Create Question
           </span>
+        </div>
+        <div className="flex items-center gap-4">
+          <ModeToggle />
         </div>
       </header>
 

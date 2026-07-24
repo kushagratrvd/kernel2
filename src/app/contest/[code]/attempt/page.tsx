@@ -38,6 +38,8 @@ const LANGUAGES = [
   { id: 62, name: "Java (OpenJDK 17)", monacoKey: "java" },
 ];
 
+import { ModeToggle } from "@/components/ui/mode-toggle";
+
 export default function ContestAttemptPage({
   params,
 }: {
@@ -368,15 +370,18 @@ export default function ContestAttemptPage({
       {/* Top Navbar */}
       <header className="sticky top-0 z-50 flex items-center justify-between border-b border-border/40 bg-background/80 px-6 py-4 backdrop-blur-md">
         <div className="flex items-center gap-4">
-          <span className="text-lg font-bold bg-gradient-to-r from-chart-1 to-chart-3 bg-clip-text text-transparent">
+          <span className="text-lg font-bold text-foreground">
             {contest.title}
           </span>
         </div>
 
-        {/* Timer Banner */}
-        <div className="flex items-center gap-2 rounded-2xl bg-primary/10 px-4 py-2 text-sm font-semibold text-primary">
-          <HugeiconsIcon icon={HourglassIcon} className="size-4 animate-pulse" />
-          <span>{timeLeft !== null ? formatTime(timeLeft) : "Loading..."}</span>
+        <div className="flex items-center gap-3">
+          <ModeToggle />
+          {/* Timer Banner */}
+          <div className="flex items-center gap-2 rounded-2xl bg-primary/10 px-4 py-2 text-sm font-semibold text-primary">
+            <HugeiconsIcon icon={HourglassIcon} className="size-4 animate-pulse" />
+            <span>{timeLeft !== null ? formatTime(timeLeft) : "Loading..."}</span>
+          </div>
         </div>
       </header>
 

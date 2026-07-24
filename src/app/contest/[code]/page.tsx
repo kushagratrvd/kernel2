@@ -18,6 +18,8 @@ import {
   AlertCircleIcon,
 } from "@hugeicons/core-free-icons";
 
+import { ModeToggle } from "@/components/ui/mode-toggle";
+
 export default function ContestCoverPage({
   params,
 }: {
@@ -34,6 +36,13 @@ export default function ContestCoverPage({
   // Mutations
   const joinMutation = useMutation(trpc.contest.join.mutationOptions());
   const startAttemptMutation = useMutation(trpc.contest.startAttempt.mutationOptions());
+
+  // If already finished, redirect to results page
+  useEffect(() => {
+    if (data?.participation?.finishedAt) {
+      router.push(`/contest/${code}/results`);
+    }
+  }, [data?.participation?.finishedAt, code, router]);
 
   if (isLoading) {
     return (
@@ -62,13 +71,6 @@ export default function ContestCoverPage({
   }
 
   const { contest, participation } = data;
-
-  // If already finished, redirect to results page
-  useEffect(() => {
-    if (participation?.finishedAt) {
-      router.push(`/contest/${code}/results`);
-    }
-  }, [participation?.finishedAt, code, router]);
 
   if (participation?.finishedAt) {
     return null;
@@ -105,7 +107,7 @@ export default function ContestCoverPage({
         <div className="text-sm font-semibold tracking-wider text-muted-foreground uppercase">
           Contest Overview
         </div>
-        <div className="w-16" /> {/* Spacer */}
+        <ModeToggle />
       </header>
 
       {/* Main card */}
