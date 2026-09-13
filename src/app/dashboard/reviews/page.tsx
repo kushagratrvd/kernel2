@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -29,7 +29,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { ModeToggle } from "@/components/ui/mode-toggle";
 
-export default function ReviewDeskPage() {
+function ReviewDeskContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const trpc = useTRPC();
@@ -493,5 +493,19 @@ export default function ReviewDeskPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export default function ReviewDeskPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
+          <Spinner className="size-8 text-neutral-400" />
+        </div>
+      }
+    >
+      <ReviewDeskContent />
+    </Suspense>
   );
 }

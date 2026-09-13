@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/lib/auth-client";
@@ -55,7 +55,7 @@ interface TestCase {
   isSample: boolean;
 }
 
-export default function QuestionsStudioPage() {
+function QuestionsStudioContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const trpc = useTRPC();
@@ -728,5 +728,19 @@ export default function QuestionsStudioPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export default function QuestionsStudioPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
+          <Spinner className="size-8 text-neutral-400" />
+        </div>
+      }
+    >
+      <QuestionsStudioContent />
+    </Suspense>
   );
 }
