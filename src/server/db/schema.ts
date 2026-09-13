@@ -2,3 +2,5 @@
 // drizzle.config.ts points to this file
 export * from "./auth-schema";
 export * from "./contest-schema";
+export * from "./question-bank-schema";
+export * from "./audit-schema";

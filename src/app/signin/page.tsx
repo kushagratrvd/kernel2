@@ -50,8 +50,29 @@ export default function SignIn() {
       if (result.error) {
         setError(result.error.message ?? "Invalid email or password.");
       } else {
-        if(result.data.user.role === "student") router.push("/contest");
-        else if(result.data.user.role === "admin") router.push("/dashboard");
+        const rawRoles = (result.data.user as any).roles;
+        let userRoles: string[] = [];
+        if (Array.isArray(rawRoles)) {
+          userRoles = rawRoles;
+        } else if (typeof rawRoles === "string") {
+          try {
+            userRoles = JSON.parse(rawRoles);
+          } catch {
+            userRoles = [rawRoles];
+          }
+        } else if (result.data.user.role) {
+          userRoles = [result.data.user.role];
+        }
+
+        const isStaff = userRoles.some(
+          (r) => r === "admin" || r === "creator" || r === "reviewer"
+        );
+
+        if (isStaff) {
+          router.push("/dashboard");
+        } else {
+          router.push("/contest");
+        }
       }
     } catch {
       setError("Something went wrong. Please try again.");

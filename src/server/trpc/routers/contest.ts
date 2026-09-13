@@ -1,11 +1,67 @@
-import { createTRPCRouter, protectedProcedure, adminProcedure } from "../init";
+import { createTRPCRouter, protectedProcedure, adminProcedure, creatorOrReviewerProcedure } from "../init";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { eq, and, ne } from "drizzle-orm";
-import { contest, contestParticipation, question, testCase, submission } from "@/server/db/contest-schema";
+import { eq, and, ne, or, asc, desc } from "drizzle-orm";
+import { contest, contestQuestion, contestParticipation, submission } from "@/server/db/contest-schema";
+import { question, questionVersion } from "@/server/db/question-bank-schema";
+import { auditLog } from "@/server/db/audit-schema";
 import { executeSubmission, checkOutputsMatch } from "@/server/codebox";
 
+// ─── Type helpers ─────────────────────────────────────────────────────────────
+
+type TestCase = { input: string; expectedOutput: string; isSample: boolean };
+type MCQOption = { id: string; text: string };
+
+function getVersionContent(version: typeof questionVersion.$inferSelect) {
+  return {
+    title: version.title,
+    description: version.description,
+    options: version.options as MCQOption[] | null,
+    correctOptionId: version.correctOptionId,
+    hint: version.hint,
+    questionScore: version.questionScore,
+    starterCode: version.starterCode as Record<string, string> | null,
+    allowedLanguages: version.allowedLanguages as number[] | null,
+    timeLimit: version.timeLimit,
+    memoryLimit: version.memoryLimit,
+    testCases: version.testCases as TestCase[] | null,
+  };
+}
+
+async function resolveContestQuestion(
+  db: any,
+  contestId: string,
+  targetId?: string
+) {
+  if (!targetId) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Question ID must be specified." });
+  }
+
+  let cq = await db.query.contestQuestion.findFirst({
+    where: eq(contestQuestion.id, targetId),
+    with: { version: true, question: { columns: { id: true, questionType: true } } },
+  });
+
+  if (!cq) {
+    cq = await db.query.contestQuestion.findFirst({
+      where: and(
+        eq(contestQuestion.contestId, contestId),
+        eq(contestQuestion.questionId, targetId)
+      ),
+      with: { version: true, question: { columns: { id: true, questionType: true } } },
+    });
+  }
+
+  if (!cq) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Question not found in this contest." });
+  }
+
+  return cq;
+}
+
 export const contestRouter = createTRPCRouter({
+  // ─── Student Endpoints ────────────────────────────────────────────────────
+
   // Get contest by code (for student cover & attempt pages)
   getByCode: protectedProcedure
     .input(z.object({ code: z.string().min(1) }))
@@ -13,13 +69,11 @@ export const contestRouter = createTRPCRouter({
       const foundContest = await ctx.db.query.contest.findFirst({
         where: eq(contest.code, input.code),
         with: {
-          questions: {
-            orderBy: (q, { asc }) => [asc(q.questionOrder)],
+          contestQuestions: {
+            orderBy: (cq, { asc }) => [asc(cq.questionOrder)],
             with: {
-              testCases: {
-                // Only return sample test cases to the frontend student view
-                where: (tc, { eq }) => eq(tc.isSample, true),
-              },
+              version: true,
+              question: { columns: { id: true, questionType: true } },
             },
           },
         },
@@ -39,19 +93,62 @@ export const contestRouter = createTRPCRouter({
         });
       }
 
-      // Check if user has already joined or started
       const participation = await ctx.db.query.contestParticipation.findFirst({
         where: and(
           eq(contestParticipation.contestId, foundContest.id),
           eq(contestParticipation.userId, ctx.user.id)
         ),
-        with: {
-          submissions: true,
-        },
+        with: { submissions: true },
+      });
+
+      // Shape questions for student view — only sample test cases exposed
+      const questions = foundContest.contestQuestions.map((cq) => {
+        const content = getVersionContent(cq.version);
+        const sampleTestCases = (content.testCases ?? []).filter((tc) => tc.isSample);
+        const optionsList = content.options
+          ? content.options.map((opt) => (typeof opt === "string" ? opt : (opt as MCQOption).text))
+          : null;
+
+        return {
+          id: cq.id, // contestQuestion id (used for submissions)
+          contestQuestionId: cq.id,
+          questionId: cq.question.id,
+          questionType: cq.question.questionType,
+          questionOrder: cq.questionOrder,
+          marks: cq.marks,
+          questionScore: cq.marks,
+          title: content.title,
+          questionText: content.title,
+          description: content.description,
+          options: optionsList,
+          structuredOptions: content.options,
+          correctOption: content.correctOptionId,
+          hint: content.hint,
+          starterCode: content.starterCode,
+          allowedLanguages: content.allowedLanguages,
+          timeLimit: content.timeLimit,
+          memoryLimit: content.memoryLimit,
+          testCases: sampleTestCases,
+        };
       });
 
       return {
-        contest: foundContest,
+        contest: {
+          id: foundContest.id,
+          code: foundContest.code,
+          title: foundContest.title,
+          description: foundContest.description,
+          coverImageUrl: foundContest.coverImageUrl,
+          startTime: foundContest.startTime,
+          endTime: foundContest.endTime,
+          totalTime: foundContest.totalTime,
+          duration: foundContest.duration,
+          isActive: foundContest.isActive,
+          totalQuestions: foundContest.totalQuestions,
+          totalScore: foundContest.totalScore,
+          questions,
+        },
+        questions,
         participation,
       };
     }),
@@ -60,19 +157,14 @@ export const contestRouter = createTRPCRouter({
   join: protectedProcedure
     .input(z.object({ contestId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      // Verify contest exists
       const targetContest = await ctx.db.query.contest.findFirst({
         where: eq(contest.id, input.contestId),
       });
 
       if (!targetContest) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Contest not found.",
-        });
+        throw new TRPCError({ code: "NOT_FOUND", message: "Contest not found." });
       }
 
-      // Check if already registered
       const existing = await ctx.db.query.contestParticipation.findFirst({
         where: and(
           eq(contestParticipation.contestId, input.contestId),
@@ -80,16 +172,12 @@ export const contestRouter = createTRPCRouter({
         ),
       });
 
-      if (existing) {
-        return existing;
-      }
+      if (existing) return existing;
 
-      // Create new participation record
-      const id = crypto.randomUUID();
       const [newParticipation] = await ctx.db
         .insert(contestParticipation)
         .values({
-          id,
+          id: crypto.randomUUID(),
           contestId: input.contestId,
           userId: ctx.user.id,
           joinedAt: new Date(),
@@ -113,21 +201,14 @@ export const contestRouter = createTRPCRouter({
       });
 
       if (!participation) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "You must join the contest first.",
-        });
+        throw new TRPCError({ code: "BAD_REQUEST", message: "You must join the contest first." });
       }
 
-      if (participation.startedAt) {
-        return participation; // Already started
-      }
+      if (participation.startedAt) return participation;
 
       const [updated] = await ctx.db
         .update(contestParticipation)
-        .set({
-          startedAt: new Date(),
-        })
+        .set({ startedAt: new Date() })
         .where(eq(contestParticipation.id, participation.id))
         .returning();
 
@@ -138,7 +219,8 @@ export const contestRouter = createTRPCRouter({
   submitMcqOrTextAnswer: protectedProcedure
     .input(z.object({
       contestId: z.string(),
-      questionId: z.string(),
+      contestQuestionId: z.string().optional(),
+      questionId: z.string().optional(),
       userAnswer: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -150,88 +232,83 @@ export const contestRouter = createTRPCRouter({
       });
 
       if (!participation || participation.finishedAt) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Attempt is not active.",
-        });
+        throw new TRPCError({ code: "FORBIDDEN", message: "Attempt is not active." });
       }
 
-      const targetQuestion = await ctx.db.query.question.findFirst({
-        where: eq(question.id, input.questionId),
-      });
+      const cq = await resolveContestQuestion(
+        ctx.db,
+        input.contestId,
+        input.contestQuestionId ?? input.questionId
+      );
 
-      if (!targetQuestion) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Question not found.",
-        });
-      }
+      const content = getVersionContent(cq.version);
 
-      // Check answer correctness
       let status = "Incorrect";
       let scoreObtained = 0;
 
-      if (targetQuestion.questionType === "mcq") {
-        if (targetQuestion.correctOption === input.userAnswer) {
-          status = "Correct";
-          scoreObtained = targetQuestion.questionScore;
-        }
-      } else if (targetQuestion.questionType === "text") {
-        const isMatch = (targetQuestion.correctOption || "").trim().toLowerCase() === input.userAnswer.trim().toLowerCase();
+      if (cq.question.questionType === "mcq") {
+        const correctOpt = (content.options as MCQOption[] | null)?.find(
+          (o) => o.id === content.correctOptionId
+        );
+        const isMatch =
+          content.correctOptionId === input.userAnswer ||
+          (correctOpt && correctOpt.text === input.userAnswer);
+
         if (isMatch) {
           status = "Correct";
-          scoreObtained = targetQuestion.questionScore;
+          scoreObtained = cq.marks;
+        }
+      } else if (cq.question.questionType === "text") {
+        const isMatch =
+          (content.correctOptionId ?? "").trim().toLowerCase() ===
+          input.userAnswer.trim().toLowerCase();
+        if (isMatch) {
+          status = "Correct";
+          scoreObtained = cq.marks;
         }
       } else {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Question type is not MCQ or Text.",
-        });
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Question type is not MCQ or Text." });
       }
 
-      // Upsert submission record (only keep last submission for MCQ/Text to avoid clutter)
+      // Upsert — only keep last submission for MCQ/Text
       const existing = await ctx.db.query.submission.findFirst({
         where: and(
           eq(submission.contestParticipationId, participation.id),
-          eq(submission.questionId, input.questionId)
+          eq(submission.contestQuestionId, cq.id)
         ),
       });
 
       if (existing) {
         const [updated] = await ctx.db
           .update(submission)
-          .set({
-            userAnswer: input.userAnswer,
-            status,
-            scoreObtained,
-            createdAt: new Date(),
-          })
+          .set({ userAnswer: input.userAnswer, status, scoreObtained, createdAt: new Date() })
           .where(eq(submission.id, existing.id))
           .returning();
         return updated;
-      } else {
-        const submissionId = crypto.randomUUID();
-        const [newSub] = await ctx.db
-          .insert(submission)
-          .values({
-            id: submissionId,
-            contestParticipationId: participation.id,
-            questionId: input.questionId,
-            userId: ctx.user.id,
-            userAnswer: input.userAnswer,
-            status,
-            scoreObtained,
-          })
-          .returning();
-        return newSub;
       }
+
+      const [newSub] = await ctx.db
+        .insert(submission)
+        .values({
+          id: crypto.randomUUID(),
+          contestParticipationId: participation.id,
+          contestQuestionId: cq.id,
+          questionId: cq.question.id,
+          userId: ctx.user.id,
+          userAnswer: input.userAnswer,
+          status,
+          scoreObtained,
+        })
+        .returning();
+      return newSub;
     }),
 
-  // Run student code against sample test cases (no graded DB write)
+  // Run code against sample test cases (not graded)
   runCode: protectedProcedure
     .input(z.object({
       contestId: z.string(),
-      questionId: z.string(),
+      contestQuestionId: z.string().optional(),
+      questionId: z.string().optional(),
       sourceCode: z.string(),
       languageId: z.number(),
     }))
@@ -244,37 +321,22 @@ export const contestRouter = createTRPCRouter({
       });
 
       if (!participation || participation.finishedAt) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Attempt is not active.",
-        });
+        throw new TRPCError({ code: "FORBIDDEN", message: "Attempt is not active." });
       }
 
-      const targetQuestion = await ctx.db.query.question.findFirst({
-        where: eq(question.id, input.questionId),
-        with: {
-          testCases: {
-            where: (tc, { eq }) => eq(tc.isSample, true),
-          },
-        },
-      });
+      const cq = await resolveContestQuestion(
+        ctx.db,
+        input.contestId,
+        input.contestQuestionId ?? input.questionId
+      );
 
-      if (!targetQuestion) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Question not found.",
-        });
-      }
+      const content = getVersionContent(cq.version);
+      const sampleTestCases = (content.testCases ?? []).filter((tc) => tc.isSample);
 
-      const sampleTestCases = targetQuestion.testCases;
       if (sampleTestCases.length === 0) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "No sample test cases configured for this problem.",
-        });
+        throw new TRPCError({ code: "BAD_REQUEST", message: "No sample test cases configured." });
       }
 
-      // Execute code against sample test cases
       const results = await Promise.all(
         sampleTestCases.map(async (tc) => {
           const runResult = await executeSubmission({
@@ -282,14 +344,10 @@ export const contestRouter = createTRPCRouter({
             language_id: input.languageId,
             stdin: tc.input,
             expected_output: tc.expectedOutput,
-            cpu_time_limit: targetQuestion.timeLimit,
-            memory_limit: targetQuestion.memoryLimit,
+            cpu_time_limit: content.timeLimit,
+            memory_limit: content.memoryLimit,
           });
-
-          const passed = checkOutputsMatch(runResult.stdout, tc.expectedOutput);
-
           return {
-            testCaseId: tc.id,
             input: tc.input,
             expectedOutput: tc.expectedOutput,
             stdout: runResult.stdout,
@@ -298,7 +356,7 @@ export const contestRouter = createTRPCRouter({
             time: runResult.time,
             memory: runResult.memory,
             status: runResult.status,
-            passed,
+            passed: checkOutputsMatch(runResult.stdout, tc.expectedOutput),
           };
         })
       );
@@ -306,11 +364,12 @@ export const contestRouter = createTRPCRouter({
       return { results };
     }),
 
-  // Submit student code against all test cases (official submission)
+  // Submit code against all test cases (official graded submission)
   submitCode: protectedProcedure
     .input(z.object({
       contestId: z.string(),
-      questionId: z.string(),
+      contestQuestionId: z.string().optional(),
+      questionId: z.string().optional(),
       sourceCode: z.string(),
       languageId: z.number(),
     }))
@@ -323,35 +382,22 @@ export const contestRouter = createTRPCRouter({
       });
 
       if (!participation || participation.finishedAt) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Attempt is not active.",
-        });
+        throw new TRPCError({ code: "FORBIDDEN", message: "Attempt is not active." });
       }
 
-      const targetQuestion = await ctx.db.query.question.findFirst({
-        where: eq(question.id, input.questionId),
-        with: {
-          testCases: true,
-        },
-      });
+      const cq = await resolveContestQuestion(
+        ctx.db,
+        input.contestId,
+        input.contestQuestionId ?? input.questionId
+      );
 
-      if (!targetQuestion) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Question not found.",
-        });
-      }
+      const content = getVersionContent(cq.version);
+      const allTestCases = content.testCases ?? [];
 
-      const allTestCases = targetQuestion.testCases;
       if (allTestCases.length === 0) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "No test cases configured for this problem.",
-        });
+        throw new TRPCError({ code: "BAD_REQUEST", message: "No test cases configured." });
       }
 
-      // Execute code against all test cases in parallel
       const results = await Promise.all(
         allTestCases.map(async (tc) => {
           const runResult = await executeSubmission({
@@ -359,14 +405,10 @@ export const contestRouter = createTRPCRouter({
             language_id: input.languageId,
             stdin: tc.input,
             expected_output: tc.expectedOutput,
-            cpu_time_limit: targetQuestion.timeLimit,
-            memory_limit: targetQuestion.memoryLimit,
+            cpu_time_limit: content.timeLimit,
+            memory_limit: content.memoryLimit,
           });
-
-          const passed = checkOutputsMatch(runResult.stdout, tc.expectedOutput);
-
           return {
-            testCaseId: tc.id,
             input: tc.input,
             expectedOutput: tc.expectedOutput,
             stdout: runResult.stdout,
@@ -375,13 +417,12 @@ export const contestRouter = createTRPCRouter({
             time: runResult.time,
             memory: runResult.memory,
             status: runResult.status,
-            passed,
+            passed: checkOutputsMatch(runResult.stdout, tc.expectedOutput),
             isSample: tc.isSample,
           };
         })
       );
 
-      // Determine final status
       let finalStatus = "Accepted";
       let passedCount = 0;
       let compileError = false;
@@ -389,39 +430,26 @@ export const contestRouter = createTRPCRouter({
       let timeLimitExceeded = false;
 
       results.forEach((r) => {
-        if (r.passed) {
-          passedCount++;
-        }
-        if (r.status.id === 6) {
-          compileError = true;
-        } else if (r.status.id === 5) {
-          timeLimitExceeded = true;
-        } else if (r.status.id >= 7 && r.status.id <= 12) {
-          runtimeError = true;
-        }
+        if (r.passed) passedCount++;
+        if (r.status.id === 6) compileError = true;
+        else if (r.status.id === 5) timeLimitExceeded = true;
+        else if (r.status.id >= 7 && r.status.id <= 12) runtimeError = true;
       });
 
-      if (compileError) {
-        finalStatus = "Compilation Error";
-      } else if (timeLimitExceeded) {
-        finalStatus = "Time Limit Exceeded";
-      } else if (runtimeError) {
-        finalStatus = "Runtime Error";
-      } else if (passedCount < allTestCases.length) {
-        finalStatus = "Wrong Answer";
-      }
+      if (compileError) finalStatus = "Compilation Error";
+      else if (timeLimitExceeded) finalStatus = "Time Limit Exceeded";
+      else if (runtimeError) finalStatus = "Runtime Error";
+      else if (passedCount < allTestCases.length) finalStatus = "Wrong Answer";
 
-      // Calculate score based on passed test cases fraction
-      const scoreObtained = Math.round((passedCount / allTestCases.length) * targetQuestion.questionScore);
+      const scoreObtained = Math.round((passedCount / allTestCases.length) * cq.marks);
 
-      // Create submission
-      const submissionId = crypto.randomUUID();
       const [newSubmission] = await ctx.db
         .insert(submission)
         .values({
-          id: submissionId,
+          id: crypto.randomUUID(),
           contestParticipationId: participation.id,
-          questionId: input.questionId,
+          contestQuestionId: cq.id,
+          questionId: cq.question.id,
           userId: ctx.user.id,
           userAnswer: input.sourceCode,
           languageId: input.languageId,
@@ -431,7 +459,6 @@ export const contestRouter = createTRPCRouter({
             passedCount,
             totalCount: allTestCases.length,
             details: results.map((r) => ({
-              testCaseId: r.testCaseId,
               passed: r.passed,
               time: r.time,
               memory: r.memory,
@@ -448,7 +475,7 @@ export const contestRouter = createTRPCRouter({
       return newSubmission;
     }),
 
-  // Submit/Finish the contest (computes total score from highest scored submissions)
+  // Finish the contest (compute final score from best submissions)
   finishAttempt: protectedProcedure
     .input(z.object({ contestId: z.string() }))
     .mutation(async ({ ctx, input }) => {
@@ -460,25 +487,17 @@ export const contestRouter = createTRPCRouter({
       });
 
       if (!participation) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Participation record not found.",
-        });
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Participation record not found." });
       }
 
       if (participation.finishedAt) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Contest already submitted.",
-        });
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Contest already submitted." });
       }
 
-      // 1. Fetch all questions for this contest
-      const contestQuestions = await ctx.db.query.question.findMany({
-        where: eq(question.contestId, input.contestId),
+      const contestQuestions = await ctx.db.query.contestQuestion.findMany({
+        where: eq(contestQuestion.contestId, input.contestId),
       });
 
-      // 2. Fetch all submissions by this student for this participation
       const userSubmissions = await ctx.db.query.submission.findMany({
         where: and(
           eq(submission.contestParticipationId, participation.id),
@@ -486,51 +505,37 @@ export const contestRouter = createTRPCRouter({
         ),
       });
 
-      // 3. Compute final score (best submission score per question)
       let totalScore = 0;
-      contestQuestions.forEach((q) => {
-        const questionSubs = userSubmissions.filter((s) => s.questionId === q.id);
-        if (questionSubs.length > 0) {
-          const maxScore = Math.max(...questionSubs.map((s) => s.scoreObtained));
-          totalScore += maxScore;
+      contestQuestions.forEach((cq) => {
+        const cqSubs = userSubmissions.filter((s) => s.contestQuestionId === cq.id);
+        if (cqSubs.length > 0) {
+          totalScore += Math.max(...cqSubs.map((s) => s.scoreObtained));
         }
       });
 
-      // 4. Update finish time and total score
       const [updated] = await ctx.db
         .update(contestParticipation)
-        .set({
-          finishedAt: new Date(),
-          score: totalScore,
-        })
+        .set({ finishedAt: new Date(), score: totalScore })
         .where(eq(contestParticipation.id, participation.id))
         .returning();
 
-      // 5. Recalculate ranks for this contest
       const allParticipations = await ctx.db.query.contestParticipation.findMany({
         where: eq(contestParticipation.contestId, input.contestId),
         orderBy: (p, { desc }) => [desc(p.score), p.startedAt],
       });
 
-      // Update rankings in database
       for (let i = 0; i < allParticipations.length; i++) {
-        const item = allParticipations[i];
-        const newRank = i + 1;
         await ctx.db
           .update(contestParticipation)
-          .set({ rank: newRank })
-          .where(eq(contestParticipation.id, item.id));
+          .set({ rank: i + 1 })
+          .where(eq(contestParticipation.id, allParticipations[i].id));
       }
 
       const finalRank = allParticipations.findIndex((p) => p.id === participation.id) + 1;
-
-      return {
-        ...updated,
-        rank: finalRank,
-      };
+      return { ...updated, rank: finalRank };
     }),
 
-  // Get student contest results/ranking
+  // Get student contest results / leaderboard
   getResults: protectedProcedure
     .input(z.object({ contestId: z.string() }))
     .query(async ({ ctx, input }) => {
@@ -539,10 +544,7 @@ export const contestRouter = createTRPCRouter({
       });
 
       if (!foundContest) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Contest not found.",
-        });
+        throw new TRPCError({ code: "NOT_FOUND", message: "Contest not found." });
       }
 
       const participation = await ctx.db.query.contestParticipation.findFirst({
@@ -553,38 +555,23 @@ export const contestRouter = createTRPCRouter({
       });
 
       if (!participation) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You did not participate in this contest.",
-        });
+        throw new TRPCError({ code: "FORBIDDEN", message: "You did not participate in this contest." });
       }
 
-      // Get leaderboard (top 10)
       const leaderboard = await ctx.db.query.contestParticipation.findMany({
         where: eq(contestParticipation.contestId, input.contestId),
-        with: {
-          user: {
-            columns: {
-              name: true,
-              email: true,
-            },
-          },
-        },
+        with: { user: { columns: { name: true, email: true } } },
         orderBy: (p, { desc }) => [desc(p.score)],
         limit: 10,
       });
 
-      return {
-        contest: foundContest,
-        participation,
-        leaderboard,
-      };
+      return { contest: foundContest, participation, leaderboard };
     }),
 
-  // ================= ADMIN ENDPOINTS =================
+  // ─── Admin Endpoints ──────────────────────────────────────────────────────
 
-  // List all contests for admin
-  listAll: adminProcedure.query(async ({ ctx }) => {
+  // List all contests for admin, creator, reviewer
+  listAll: creatorOrReviewerProcedure.query(async ({ ctx }) => {
     return ctx.db.query.contest.findMany({
       orderBy: (c, { desc }) => [desc(c.createdAt)],
     });
@@ -603,12 +590,11 @@ export const contestRouter = createTRPCRouter({
       isActive: z.boolean().default(false),
     }))
     .mutation(async ({ ctx, input }) => {
-      const id = crypto.randomUUID();
       const [newContest] = await ctx.db
         .insert(contest)
         .values({
           ...input,
-          id,
+          id: crypto.randomUUID(),
           createdById: ctx.user.id,
           totalQuestions: 0,
           totalScore: 0,
@@ -618,216 +604,287 @@ export const contestRouter = createTRPCRouter({
       return newContest;
     }),
 
-  // Get contest details including questions and test cases for admin editing
+  // Get contest details for admin editing
   getForEdit: adminProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const found = await ctx.db.query.contest.findFirst({
         where: eq(contest.id, input.id),
         with: {
-          questions: {
-            orderBy: (q, { asc }) => [asc(q.questionOrder)],
+          contestQuestions: {
+            orderBy: (cq, { asc }) => [asc(cq.questionOrder)],
             with: {
-              testCases: true,
+              version: true,
+              question: {
+                columns: { id: true, questionType: true, difficulty: true, status: true },
+              },
             },
           },
         },
       });
 
       if (!found) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Contest not found.",
-        });
+        throw new TRPCError({ code: "NOT_FOUND", message: "Contest not found." });
       }
 
-      return found;
+      const questions = found.contestQuestions.map((cq) => {
+        const content = getVersionContent(cq.version);
+        const optionsList = content.options
+          ? content.options.map((opt) => (typeof opt === "string" ? opt : opt.text))
+          : null;
+
+        return {
+          id: cq.id,
+          contestQuestionId: cq.id,
+          questionId: cq.question.id,
+          questionType: cq.question.questionType,
+          difficulty: cq.question.difficulty,
+          status: cq.question.status,
+          questionOrder: cq.questionOrder,
+          questionScore: cq.marks,
+          marks: cq.marks,
+          title: content.title,
+          questionText: content.title,
+          description: content.description,
+          options: optionsList,
+          structuredOptions: content.options,
+          correctOption: content.correctOptionId,
+          hint: content.hint,
+          starterCode: content.starterCode,
+          allowedLanguages: content.allowedLanguages,
+          timeLimit: content.timeLimit,
+          memoryLimit: content.memoryLimit,
+          testCases: content.testCases,
+          version: cq.version.version,
+        };
+      });
+
+      return {
+        ...found,
+        questions,
+      };
     }),
 
-  // Add question to contest
+  // Add an APPROVED question (by version snapshot) to a contest
   addQuestion: adminProcedure
     .input(z.object({
       contestId: z.string(),
-      questionText: z.string().min(1),
-      questionType: z.string(), // "mcq", "text", "code"
-      options: z.array(z.string()).optional(),
-      correctOption: z.string().optional(),
-      questionScore: z.number().min(1),
-      starterCode: z.any().optional(),
-      allowedLanguages: z.array(z.number()).optional(),
-      timeLimit: z.number().optional(),
-      memoryLimit: z.number().optional(),
-      testCases: z.array(z.object({
-        input: z.string(),
-        expectedOutput: z.string(),
-        isSample: z.boolean(),
-      })).optional(),
+      questionId: z.string(),
+      marks: z.number().min(1).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const questions = await ctx.db.query.question.findMany({
-        where: eq(question.contestId, input.contestId),
-      });
-      const order = questions.length + 1;
-      const questionId = crypto.randomUUID();
-
-      await ctx.db.insert(question).values({
-        id: questionId,
-        contestId: input.contestId,
-        questionText: input.questionText,
-        questionType: input.questionType,
-        options: input.options || null,
-        correctOption: input.correctOption || null,
-        questionScore: input.questionScore,
-        questionOrder: order,
-        starterCode: input.starterCode || null,
-        allowedLanguages: input.allowedLanguages || null,
-        timeLimit: input.timeLimit ?? 5,
-        memoryLimit: input.memoryLimit ?? 128000,
-      });
-
-      if (input.questionType === "code" && input.testCases && input.testCases.length > 0) {
-        await ctx.db.insert(testCase).values(
-          input.testCases.map((tc) => ({
-            id: crypto.randomUUID(),
-            questionId,
-            input: tc.input,
-            expectedOutput: tc.expectedOutput,
-            isSample: tc.isSample,
-          }))
-        );
-      }
-
-      // Update contest totals
-      const newTotalScore = questions.reduce((sum, q) => sum + q.questionScore, 0) + input.questionScore;
-      await ctx.db
-        .update(contest)
-        .set({
-          totalQuestions: questions.length + 1,
-          totalScore: newTotalScore,
-        })
-        .where(eq(contest.id, input.contestId));
-
-      return { success: true };
-    }),
-
-  // Update question
-  updateQuestion: adminProcedure
-    .input(z.object({
-      id: z.string(),
-      questionText: z.string().min(1),
-      options: z.array(z.string()).optional(),
-      correctOption: z.string().optional(),
-      questionScore: z.number().min(1),
-      starterCode: z.any().optional(),
-      allowedLanguages: z.array(z.number()).optional(),
-      timeLimit: z.number().optional(),
-      memoryLimit: z.number().optional(),
-      testCases: z.array(z.object({
-        input: z.string(),
-        expectedOutput: z.string(),
-        isSample: z.boolean(),
-      })).optional(),
-    }))
-    .mutation(async ({ ctx, input }) => {
-      const origQuestion = await ctx.db.query.question.findFirst({
-        where: eq(question.id, input.id),
-      });
-
-      if (!origQuestion) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Question not found.",
+      return await ctx.db.transaction(async (tx) => {
+        const targetQuestion = await tx.query.question.findFirst({
+          where: eq(question.id, input.questionId),
         });
-      }
 
-      await ctx.db
-        .update(question)
-        .set({
-          questionText: input.questionText,
-          options: input.options || null,
-          correctOption: input.correctOption || null,
-          questionScore: input.questionScore,
-          starterCode: input.starterCode || null,
-          allowedLanguages: input.allowedLanguages || null,
-          timeLimit: input.timeLimit ?? 5,
-          memoryLimit: input.memoryLimit ?? 128000,
-        })
-        .where(eq(question.id, input.id));
-
-      if (origQuestion.questionType === "code" && input.testCases) {
-        await ctx.db.delete(testCase).where(eq(testCase.questionId, input.id));
-        if (input.testCases.length > 0) {
-          await ctx.db.insert(testCase).values(
-            input.testCases.map((tc) => ({
-              id: crypto.randomUUID(),
-              questionId: input.id,
-              input: tc.input,
-              expectedOutput: tc.expectedOutput,
-              isSample: tc.isSample,
-            }))
-          );
+        if (!targetQuestion) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Question not found." });
         }
-      }
 
-      // Update contest stats
-      const allQuestions = await ctx.db.query.question.findMany({
-        where: eq(question.contestId, origQuestion.contestId),
+        if (targetQuestion.status !== "APPROVED") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Only APPROVED questions can be added to a contest.",
+          });
+        }
+
+        if (!targetQuestion.currentVersionId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Question has no approved version snapshot.",
+          });
+        }
+
+        const version = await tx.query.questionVersion.findFirst({
+          where: eq(questionVersion.id, targetQuestion.currentVersionId),
+        });
+
+        if (!version) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Question version not found." });
+        }
+
+        const existingCQs = await tx.query.contestQuestion.findMany({
+          where: eq(contestQuestion.contestId, input.contestId),
+        });
+
+        const marks = input.marks ?? version.questionScore;
+        const nextOrder = existingCQs.length + 1;
+
+        await tx.insert(contestQuestion).values({
+          id: crypto.randomUUID(),
+          contestId: input.contestId,
+          questionId: input.questionId,
+          questionVersionId: version.id,
+          marks,
+          questionOrder: nextOrder,
+        });
+
+        const newTotalScore = existingCQs.reduce((sum, cq) => sum + cq.marks, 0) + marks;
+        await tx
+          .update(contest)
+          .set({ totalQuestions: nextOrder, totalScore: newTotalScore })
+          .where(eq(contest.id, input.contestId));
+
+        await tx.insert(auditLog).values({
+          id: crypto.randomUUID(),
+          userId: ctx.user.id,
+          action: "CONTEST_QUESTION_ADDED",
+          entityType: "contest",
+          entityId: input.contestId,
+          metadata: { questionId: input.questionId, versionId: version.id, marks },
+        });
+
+        return { success: true };
       });
-      const newTotalScore = allQuestions.reduce((sum, q) => sum + q.questionScore, 0);
-
-      await ctx.db
-        .update(contest)
-        .set({
-          totalScore: newTotalScore,
-        })
-        .where(eq(contest.id, origQuestion.contestId));
-
-      return { success: true };
     }),
 
-  // Delete question
+  // Remove a question from a contest
+  removeQuestion: adminProcedure
+    .input(z.object({ contestQuestionId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      return await ctx.db.transaction(async (tx) => {
+        const cq = await tx.query.contestQuestion.findFirst({
+          where: eq(contestQuestion.id, input.contestQuestionId),
+        });
+
+        if (!cq) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Contest question not found." });
+        }
+
+        await tx.delete(contestQuestion).where(eq(contestQuestion.id, input.contestQuestionId));
+
+        const remaining = await tx.query.contestQuestion.findMany({
+          where: eq(contestQuestion.contestId, cq.contestId),
+          orderBy: (cq, { asc }) => [asc(cq.questionOrder)],
+        });
+
+        for (let i = 0; i < remaining.length; i++) {
+          await tx
+            .update(contestQuestion)
+            .set({ questionOrder: i + 1 })
+            .where(eq(contestQuestion.id, remaining[i].id));
+        }
+
+        const newTotalScore = remaining.reduce((sum, cq) => sum + cq.marks, 0);
+        await tx
+          .update(contest)
+          .set({ totalQuestions: remaining.length, totalScore: newTotalScore })
+          .where(eq(contest.id, cq.contestId));
+
+        await tx.insert(auditLog).values({
+          id: crypto.randomUUID(),
+          userId: ctx.user.id,
+          action: "CONTEST_QUESTION_REMOVED",
+          entityType: "contest",
+          entityId: cq.contestId,
+          metadata: { contestQuestionId: input.contestQuestionId, questionId: cq.questionId },
+        });
+
+        return { success: true };
+      });
+    }),
+
+  // Alias for backward compatibility with contest edit page
   deleteQuestion: adminProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const origQuestion = await ctx.db.query.question.findFirst({
-        where: eq(question.id, input.id),
-      });
-
-      if (!origQuestion) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Question not found.",
+      return await ctx.db.transaction(async (tx) => {
+        let cq = await tx.query.contestQuestion.findFirst({
+          where: eq(contestQuestion.id, input.id),
         });
-      }
+        if (!cq) {
+          cq = await tx.query.contestQuestion.findFirst({
+            where: eq(contestQuestion.questionId, input.id),
+          });
+        }
 
-      await ctx.db.delete(question).where(eq(question.id, input.id));
+        if (!cq) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Contest question not found." });
+        }
 
-      // Re-order questions and compute new stats
-      const remainingQuestions = await ctx.db.query.question.findMany({
-        where: eq(question.contestId, origQuestion.contestId),
-        orderBy: (q, { asc }) => [asc(q.questionOrder)],
+        await tx.delete(contestQuestion).where(eq(contestQuestion.id, cq.id));
+
+        const remaining = await tx.query.contestQuestion.findMany({
+          where: eq(contestQuestion.contestId, cq.contestId),
+          orderBy: (cq, { asc }) => [asc(cq.questionOrder)],
+        });
+
+        for (let i = 0; i < remaining.length; i++) {
+          await tx
+            .update(contestQuestion)
+            .set({ questionOrder: i + 1 })
+            .where(eq(contestQuestion.id, remaining[i].id));
+        }
+
+        const newTotalScore = remaining.reduce((sum, item) => sum + item.marks, 0);
+        await tx
+          .update(contest)
+          .set({ totalQuestions: remaining.length, totalScore: newTotalScore })
+          .where(eq(contest.id, cq.contestId));
+
+        await tx.insert(auditLog).values({
+          id: crypto.randomUUID(),
+          userId: ctx.user.id,
+          action: "CONTEST_QUESTION_REMOVED",
+          entityType: "contest",
+          entityId: cq.contestId,
+          metadata: { contestQuestionId: cq.id, questionId: cq.questionId },
+        });
+
+        return { success: true };
       });
-
-      for (let i = 0; i < remainingQuestions.length; i++) {
-        await ctx.db
-          .update(question)
-          .set({ questionOrder: i + 1 })
-          .where(eq(question.id, remainingQuestions[i].id));
-      }
-
-      const newTotalScore = remainingQuestions.reduce((sum, q) => sum + q.questionScore, 0);
-      await ctx.db
-        .update(contest)
-        .set({
-          totalQuestions: remainingQuestions.length,
-          totalScore: newTotalScore,
-        })
-        .where(eq(contest.id, origQuestion.contestId));
-
-      return { success: true };
     }),
 
-  // Update contest
+  // Update contest question (marks/order)
+  updateQuestion: adminProcedure
+    .input(z.object({
+      id: z.string(),
+      marks: z.number().optional(),
+      questionOrder: z.number().optional(),
+      questionText: z.string().optional(),
+      questionScore: z.number().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      return await ctx.db.transaction(async (tx) => {
+        let cq = await tx.query.contestQuestion.findFirst({
+          where: eq(contestQuestion.id, input.id),
+        });
+        if (!cq) {
+          cq = await tx.query.contestQuestion.findFirst({
+            where: eq(contestQuestion.questionId, input.id),
+          });
+        }
+
+        if (!cq) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Contest question not found." });
+        }
+
+        const effectiveMarks = input.marks ?? input.questionScore;
+        const updateData: Record<string, any> = {};
+        if (effectiveMarks !== undefined) updateData.marks = effectiveMarks;
+        if (input.questionOrder !== undefined) updateData.questionOrder = input.questionOrder;
+
+        const [updated] = await tx
+          .update(contestQuestion)
+          .set(updateData)
+          .where(eq(contestQuestion.id, cq.id))
+          .returning();
+
+        const allCQs = await tx.query.contestQuestion.findMany({
+          where: eq(contestQuestion.contestId, cq.contestId),
+        });
+        const totalScore = allCQs.reduce((sum, item) => sum + item.marks, 0);
+        await tx
+          .update(contest)
+          .set({ totalScore })
+          .where(eq(contest.id, cq.contestId));
+
+        return updated;
+      });
+    }),
+
+  // Update contest metadata
   update: adminProcedure
     .input(z.object({
       id: z.string().min(1),
@@ -843,7 +900,6 @@ export const contestRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const { id, ...updateData } = input;
 
-      // Check if another contest uses the same code
       const existing = await ctx.db.query.contest.findFirst({
         where: and(
           eq(contest.code, updateData.code.trim().toUpperCase()),
@@ -852,10 +908,7 @@ export const contestRouter = createTRPCRouter({
       });
 
       if (existing) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "A contest with this code already exists.",
-        });
+        throw new TRPCError({ code: "CONFLICT", message: "A contest with this code already exists." });
       }
 
       const [updatedContest] = await ctx.db

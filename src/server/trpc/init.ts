@@ -14,23 +14,27 @@ import { type NextRequest } from "next/server";
 import { db } from "@/server/db";
 import { auth } from "@/server/auth"; 
 
+export function getUserRoles(user: any): string[] {
+  if (Array.isArray(user?.roles)) return user.roles;
+  if (typeof user?.roles === "string") {
+    try {
+      const parsed = JSON.parse(user.roles);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      return [user.roles];
+    }
+  }
+  if (user?.role && typeof user.role === "string") return [user.role];
+  return ["student"];
+}
+
 /**
  * 1. CONTEXT
- *
- * This section defines the "contexts" that are available in the backend API.
- *
- * These allow you to access things when processing a request, like the database, the session, etc.
- *
- * This helper generates the "internals" for a tRPC context. The API handler and RSC clients each
- * wrap this and provides the required context.
- *
- * @see https://trpc.io/docs/server/context
  */
 export const createTRPCContext = async (opts: { 
   headers: Headers;
   req?: NextRequest;
  }) => {
-  // Get session from Better Auth using the headers
   const session = await auth.api.getSession({
     headers: opts.headers,
   });
@@ -44,10 +48,6 @@ export const createTRPCContext = async (opts: {
 
 /**
  * 2. INITIALIZATION
- *
- * This is where the tRPC API is initialized, connecting the context and transformer. We also parse
- * ZodErrors so that you get typesafety on the frontend if your procedure fails due to validation
- * errors on the backend.
  */
 const t = initTRPC.context<typeof createTRPCContext>().create({
   transformer: superjson,
@@ -63,38 +63,17 @@ const t = initTRPC.context<typeof createTRPCContext>().create({
   },
 });
 
-/**
- * Create a server-side caller.
- *
- * @see https://trpc.io/docs/server/server-side-calls
- */
 export const createCallerFactory = t.createCallerFactory;
 
 /**
- * 3. ROUTER & PROCEDURE (THE IMPORTANT BIT)
- *
- * These are the pieces you use to build your tRPC API. You should import these a lot in the
- * "/src/server/api/routers" directory.
- */
-
-/**
- * This is how you create new routers and sub-routers in your tRPC API.
- *
- * @see https://trpc.io/docs/router
+ * 3. ROUTER & PROCEDURE
  */
 export const createTRPCRouter = t.router;
 
-/**
- * Middleware for timing procedure execution and adding an artificial delay in development.
- *
- * You can remove this if you don't like it, but it can help catch unwanted waterfalls by simulating
- * network latency that would occur in production but not in local development.
- */
 const timingMiddleware = t.middleware(async ({ next, path }) => {
   const start = Date.now();
 
   if (t._config.isDev) {
-    // artificial delay in dev
     const waitMs = Math.floor(Math.random() * 400) + 100;
     await new Promise((resolve) => setTimeout(resolve, waitMs));
   }
@@ -107,7 +86,7 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
   return result;
 });
 
-// Auth Middleware checks if user is logged in
+// Auth Middleware checks if user is logged in and active
 const authMiddleware = t.middleware(({ ctx, next }) => {
   if (!ctx.session?.user) {
     throw new TRPCError({
@@ -115,36 +94,117 @@ const authMiddleware = t.middleware(({ ctx, next }) => {
       message: "You must be logged in to perform this action",
     });
   }
+
+  const user = ctx.session.user as any;
+  if (user.banned || user.status === "INACTIVE") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Your account is deactivated or banned",
+    });
+  }
+
   return next({
     ctx: {
       session: ctx.session,
       user: ctx.session.user,
+      roles: getUserRoles(user),
     },
   });
-})
+});
 
 const adminMiddleware = t.middleware(({ ctx, next }) => {
-    if (ctx.session?.user?.role !== "admin") {
-        throw new TRPCError({
-            code: "UNAUTHORIZED",
-            message: "You must be logged in as an admin to perform this action",
-        });
-    }
-    return next({
-        ctx: {
-            session: ctx.session,
-            user: ctx.session.user,
-        },
+  if (!ctx.session?.user) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "You must be logged in to perform this action",
     });
-})
+  }
+  const roles = getUserRoles(ctx.session.user);
+  if (!roles.includes("admin")) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "You must be an admin to perform this action",
+    });
+  }
+  return next({
+    ctx: {
+      session: ctx.session,
+      user: ctx.session.user,
+      roles,
+    },
+  });
+});
 
-/**
- * Public (unauthenticated) procedure
- *
- * This is the base piece you use to build new queries and mutations on your tRPC API. It does not
- * guarantee that a user querying is authorized, but you can still access user session data if they
- * are logged in.
- */
+const creatorMiddleware = t.middleware(({ ctx, next }) => {
+  if (!ctx.session?.user) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "You must be logged in to perform this action",
+    });
+  }
+  const roles = getUserRoles(ctx.session.user);
+  if (!roles.includes("creator") && !roles.includes("admin")) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "You must be a creator or admin to perform this action",
+    });
+  }
+  return next({
+    ctx: {
+      session: ctx.session,
+      user: ctx.session.user,
+      roles,
+    },
+  });
+});
+
+const reviewerMiddleware = t.middleware(({ ctx, next }) => {
+  if (!ctx.session?.user) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "You must be logged in to perform this action",
+    });
+  }
+  const roles = getUserRoles(ctx.session.user);
+  if (!roles.includes("reviewer") && !roles.includes("admin")) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "You must be a reviewer or admin to perform this action",
+    });
+  }
+  return next({
+    ctx: {
+      session: ctx.session,
+      user: ctx.session.user,
+      roles,
+    },
+  });
+});
+
+const creatorOrReviewerMiddleware = t.middleware(({ ctx, next }) => {
+  if (!ctx.session?.user) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "You must be logged in to perform this action",
+    });
+  }
+  const roles = getUserRoles(ctx.session.user);
+  const isAllowed = roles.some((r) => r === "creator" || r === "reviewer" || r === "admin");
+  if (!isAllowed) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "You must be a creator, reviewer, or admin to perform this action",
+    });
+  }
+  return next({
+    ctx: {
+      session: ctx.session,
+      user: ctx.session.user,
+      roles,
+    },
+  });
+});
+
 export const publicProcedure = t.procedure.use(timingMiddleware);
 
 export const protectedProcedure = t.procedure
@@ -155,3 +215,18 @@ export const adminProcedure = t.procedure
   .use(timingMiddleware)
   .use(authMiddleware)
   .use(adminMiddleware);
+
+export const creatorProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(authMiddleware)
+  .use(creatorMiddleware);
+
+export const reviewerProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(authMiddleware)
+  .use(reviewerMiddleware);
+
+export const creatorOrReviewerProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(authMiddleware)
+  .use(creatorOrReviewerMiddleware);

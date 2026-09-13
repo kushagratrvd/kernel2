@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, index, jsonb } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -7,7 +7,12 @@ export const user = pgTable("user", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").default(false).notNull(),
   image: text("image"),
+  // Multi-role support: e.g. ["admin"], ["creator", "reviewer"], ["student"]
+  roles: jsonb("roles").notNull().$default(() => ["student"] as string[]).$type<string[]>(),
+  // Keep role for better-auth plugin compatibility (kept in sync with roles[0])
   role: text("role").notNull().$default(() => "student"),
+  // Soft-delete: ACTIVE | INACTIVE
+  status: text("status").notNull().default("ACTIVE"),
   banned: boolean("banned").default(false).notNull(),
   banReason: text("ban_reason"),
   banExpires: timestamp("ban_expires"),
