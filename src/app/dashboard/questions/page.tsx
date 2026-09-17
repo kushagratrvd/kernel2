@@ -321,10 +321,11 @@ function QuestionsStudioContent() {
                       {draft?.description || "No description provided."}
                     </p>
 
-                    <div className="flex items-center gap-2 text-2xs text-muted-foreground font-semibold pt-1">
+                    <div className="flex flex-wrap items-center gap-2 text-2xs text-muted-foreground font-semibold pt-1">
                       <span>{q.category?.name || "General"}</span>
                       {q.topic?.name && <span>• {q.topic.name}</span>}
                       <span>• {draft?.questionScore || 100} pts</span>
+                      {q.createdBy && <span>• By {q.createdBy.name || q.createdBy.email}</span>}
                     </div>
                   </div>
 

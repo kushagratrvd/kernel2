@@ -308,29 +308,47 @@ export const questionBankRouter = createTRPCRouter({
       });
     }),
 
-  // List questions created by current user
+  // List questions created by current user (or all questions for admins)
   listMyQuestions: creatorProcedure
     .input(
       z.object({
         status: z.string().optional(),
         search: z.string().optional(),
+        all: z.boolean().optional(),
       }).optional()
     )
     .query(async ({ ctx, input }) => {
-      const conditions = [eq(question.createdById, ctx.user.id)];
+      const isAdmin = ctx.roles.includes("admin");
+      const conditions = [];
+
+      if (!isAdmin || input?.all === false) {
+        conditions.push(eq(question.createdById, ctx.user.id));
+      }
 
       if (input?.status) {
         conditions.push(eq(question.status, input.status));
       }
 
-      return ctx.db.query.question.findMany({
-        where: and(...conditions),
+      const questions = await ctx.db.query.question.findMany({
+        where: conditions.length > 0 ? and(...conditions) : undefined,
         orderBy: (q, { desc }) => [desc(q.updatedAt)],
         with: {
           category: true,
           topic: true,
           currentVersion: true,
+          createdBy: { columns: { id: true, name: true, email: true } },
         },
+      });
+
+      if (!input?.search || !input.search.trim()) return questions;
+      const q = input.search.trim().toLowerCase();
+      return questions.filter((item) => {
+        const title = (item.currentDraft as any)?.title?.toLowerCase() || item.currentVersion?.title?.toLowerCase() || "";
+        const desc = (item.currentDraft as any)?.description?.toLowerCase() || item.currentVersion?.description?.toLowerCase() || "";
+        const cat = item.category?.name?.toLowerCase() || "";
+        const top = item.topic?.name?.toLowerCase() || "";
+        const creator = item.createdBy?.name?.toLowerCase() || item.createdBy?.email?.toLowerCase() || "";
+        return title.includes(q) || desc.includes(q) || cat.includes(q) || top.includes(q) || creator.includes(q);
       });
     }),
 
@@ -386,7 +404,7 @@ export const questionBankRouter = createTRPCRouter({
 
   // ─── Reviewer Endpoints ───────────────────────────────────────────────────
 
-  // List pending and in-review assignments for reviewer
+  // List pending and in-review assignments for reviewer (or all for admin)
   listAssigned: reviewerProcedure
     .input(
       z.object({
@@ -394,15 +412,18 @@ export const questionBankRouter = createTRPCRouter({
       }).optional()
     )
     .query(async ({ ctx, input }) => {
+      const isAdmin = ctx.roles.includes("admin");
       const statusConditions = input?.status
         ? [eq(questionAssignment.status, input.status)]
         : [inArray(questionAssignment.status, ["PENDING", "IN_REVIEW"])];
 
+      const whereConditions = [...statusConditions];
+      if (!isAdmin) {
+        whereConditions.push(eq(questionAssignment.reviewerId, ctx.user.id));
+      }
+
       return ctx.db.query.questionAssignment.findMany({
-        where: and(
-          eq(questionAssignment.reviewerId, ctx.user.id),
-          ...statusConditions
-        ),
+        where: and(...whereConditions),
         orderBy: (a, { desc }) => [desc(a.assignedAt)],
         with: {
           question: {
@@ -414,17 +435,23 @@ export const questionBankRouter = createTRPCRouter({
           },
           version: true,
           assignedBy: { columns: { id: true, name: true, email: true } },
+          reviewer: { columns: { id: true, name: true, email: true } },
         },
       });
     }),
 
-  // List reviewer history (completed reviews)
+  // List reviewer history (completed reviews - or all for admin)
   listHistory: reviewerProcedure.query(async ({ ctx }) => {
+    const isAdmin = ctx.roles.includes("admin");
+    const whereConditions = [
+      inArray(questionAssignment.status, ["COMPLETED", "CANCELLED"]),
+    ];
+    if (!isAdmin) {
+      whereConditions.push(eq(questionAssignment.reviewerId, ctx.user.id));
+    }
+
     return ctx.db.query.questionAssignment.findMany({
-      where: and(
-        eq(questionAssignment.reviewerId, ctx.user.id),
-        inArray(questionAssignment.status, ["COMPLETED", "CANCELLED"])
-      ),
+      where: and(...whereConditions),
       orderBy: (a, { desc }) => [desc(a.completedAt ?? a.assignedAt)],
       with: {
         question: {
@@ -436,6 +463,7 @@ export const questionBankRouter = createTRPCRouter({
         },
         version: true,
         assignedBy: { columns: { id: true, name: true, email: true } },
+        reviewer: { columns: { id: true, name: true, email: true } },
       },
     });
   }),
@@ -445,17 +473,23 @@ export const questionBankRouter = createTRPCRouter({
     .input(z.object({ assignmentId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       return await ctx.db.transaction(async (tx) => {
+        const isAdmin = ctx.roles.includes("admin");
+        const whereConditions = [
+          eq(questionAssignment.id, input.assignmentId),
+          eq(questionAssignment.status, "PENDING"),
+        ];
+        if (!isAdmin) {
+          whereConditions.push(eq(questionAssignment.reviewerId, ctx.user.id));
+        }
+
         // Atomic update to avoid race condition
         const [updatedAssignment] = await tx
           .update(questionAssignment)
-          .set({ status: "IN_REVIEW" })
-          .where(
-            and(
-              eq(questionAssignment.id, input.assignmentId),
-              eq(questionAssignment.reviewerId, ctx.user.id),
-              eq(questionAssignment.status, "PENDING")
-            )
-          )
+          .set({
+            status: "IN_REVIEW",
+            ...(isAdmin ? { reviewerId: ctx.user.id } : {}),
+          })
+          .where(and(...whereConditions))
           .returning();
 
         if (!updatedAssignment) {

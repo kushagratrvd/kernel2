@@ -94,7 +94,7 @@ export default function DashboardPage() {
   const myChangesRequestedCount = myQuestions?.filter((q) => q.status === "CHANGES_REQUESTED").length || 0;
   const myApprovedCount = myQuestions?.filter((q) => q.status === "APPROVED").length || 0;
 
-  const pendingAssignedReviewsCount = assignedReviews?.filter((r) => r.status === "PENDING").length || 0;
+  const pendingAssignedReviewsCount = assignedReviews?.length || 0;
   const inReviewCount = assignedReviews?.filter((r) => r.status === "IN_REVIEW").length || 0;
 
   return (
@@ -247,7 +247,7 @@ export default function DashboardPage() {
                 </div>
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    My Working Drafts
+                    {isAdmin ? "Platform Drafts" : "My Working Drafts"}
                   </p>
                   <h3 className="text-2xl font-black mt-1 text-purple-500">
                     {myDraftsCount} Drafts
@@ -320,7 +320,9 @@ export default function DashboardPage() {
                   <HugeiconsIcon icon={FileQuestionMarkIcon} className="size-5" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold">My Question Bank Studio</h3>
+                  <h3 className="text-lg font-bold">
+                    {isAdmin ? "Question Bank Overview" : "My Question Bank Studio"}
+                  </h3>
                   <p className="text-xs text-muted-foreground">
                     Manage drafts, submit for reviewer verification, and monitor approval status
                   </p>
@@ -347,6 +349,7 @@ export default function DashboardPage() {
                       <th className="p-4">Type</th>
                       <th className="p-4">Category / Topic</th>
                       <th className="p-4">Difficulty</th>
+                      {isAdmin && <th className="p-4">Creator</th>}
                       <th className="p-4">Status</th>
                       <th className="p-4 text-right">Action</th>
                     </tr>
@@ -378,6 +381,11 @@ export default function DashboardPage() {
                               {q.difficulty}
                             </span>
                           </td>
+                          {isAdmin && (
+                            <td className="p-4 text-xs text-muted-foreground">
+                              {q.createdBy?.name || q.createdBy?.email || "Creator"}
+                            </td>
+                          )}
                           <td className="p-4">
                             <Badge
                               variant="outline"
@@ -460,6 +468,7 @@ export default function DashboardPage() {
                       <th className="p-4">Question Title</th>
                       <th className="p-4">Version</th>
                       <th className="p-4">Creator</th>
+                      {isAdmin && <th className="p-4">Reviewer</th>}
                       <th className="p-4">Review Status</th>
                       <th className="p-4 text-right">Action</th>
                     </tr>
@@ -478,6 +487,11 @@ export default function DashboardPage() {
                         <td className="p-4 text-xs text-muted-foreground">
                           {a.assignedBy?.name || a.assignedBy?.email}
                         </td>
+                        {isAdmin && (
+                          <td className="p-4 text-xs text-muted-foreground">
+                            {a.reviewer?.name || a.reviewer?.email || "Assigned Reviewer"}
+                          </td>
+                        )}
                         <td className="p-4">
                           <Badge
                             variant="outline"
