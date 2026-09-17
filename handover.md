@@ -46,7 +46,7 @@
 ## 5. 5-Line Session Summary
 
 - What was done: Implemented Admin Direct Question Approval with cancel-and-create assignment pattern, shared draft validation, shared client `getUserRoles`, and confirmation dialogs.
-- What was committed: Pending commit for admin direct approval workflow.
+- What was committed: `b42d601` (`feat: admin direct question approval with immutable snapshot minting and assignment cancel-and-create pattern`).
 - Build state: Verified `pnpm exec tsc --noEmit` with 0 type errors.
 - What's left: Browser smoke test of direct approval flow and contest picker integration.
 - What to watch out for: Direct approval cancels active assignments without deleting them, preserving the audit trail while moving questions straight to `APPROVED`.

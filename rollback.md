@@ -8,6 +8,7 @@
 
 | Commit Hash | Commit Message | Verified State |
 | :--- | :--- | :--- |
+| `b42d601` | `feat: admin direct question approval with immutable snapshot minting and assignment cancel-and-create pattern` | Admin direct approval live; immutable version snapshot minting; 0 tsc errors. |
 | `50582fc` | `feat: restrict contests access and visibility exclusively to admin` | Contests completely restricted to Admin. `pnpm tsc` clean. |
 | `251ef29` | `refactor: extract QuestionStatusBadge and ReviewDiscussionThread into reusable components` | Shared components extracted with zero styling drift. |
 | `1f84975` | `feat: enhance reviewer desk and question studio with table layout, accurate review history status, and chat thread` | Table layouts active; accurate "Changes Requested" badge; modal discussion thread. |
