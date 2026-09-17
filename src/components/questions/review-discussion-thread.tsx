@@ -25,6 +25,9 @@ interface ReviewDiscussionThreadProps {
   assignmentStatus?: string | null;
   onCommentAdded?: () => void;
   onSubmitForReview?: (questionId: string) => void;
+  isAdmin?: boolean;
+  onDirectApprove?: () => void;
+  isDirectApproving?: boolean;
   showBanner?: boolean;
   className?: string;
 }
@@ -37,6 +40,9 @@ export function ReviewDiscussionThread({
   assignmentStatus,
   onCommentAdded,
   onSubmitForReview,
+  isAdmin,
+  onDirectApprove,
+  isDirectApproving,
   showBanner = true,
   className = "",
 }: ReviewDiscussionThreadProps) {
@@ -160,6 +166,35 @@ export function ReviewDiscussionThread({
                   <p className="text-2xs text-yellow-400/80">
                     A reviewer has been assigned and will pick up this question.
                   </p>
+                </div>
+              </div>
+            )}
+
+          {/* Admin Direct Approval Option */}
+          {isAdmin &&
+            onDirectApprove &&
+            questionStatus &&
+            ["DRAFT", "CHANGES_REQUESTED", "SUBMITTED_FOR_REVIEW", "UNDER_REVIEW"].includes(
+              questionStatus
+            ) && (
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-2 mt-2">
+                <div className="flex items-center gap-1.5 text-emerald-500 font-bold text-xs">
+                  <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-4 shrink-0" />
+                  Admin Direct Approval Available
+                </div>
+                <p className="text-2xs text-emerald-400/90 leading-relaxed">
+                  As an administrator, you can bypass peer review and approve this draft directly into the Question Bank.
+                </p>
+                <div className="pt-1">
+                  <Button
+                    size="xs"
+                    onClick={onDirectApprove}
+                    disabled={isDirectApproving}
+                    className="rounded-xl gap-1 text-2xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+                  >
+                    <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-3" />
+                    Approve to Question Bank
+                  </Button>
                 </div>
               </div>
             )}

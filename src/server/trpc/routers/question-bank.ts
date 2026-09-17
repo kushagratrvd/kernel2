@@ -49,6 +49,70 @@ const questionDraftSchema = z.object({
 
 type QuestionDraftContent = z.infer<typeof questionDraftSchema>;
 
+/**
+ * Validates question draft content before snapshot minting or review submission.
+ * Enforces title, description, and question-type specific structural requirements
+ * (MCQ: >=2 options with unique IDs, correctOptionId matching an option, non-empty text;
+ *  Code: >=1 test case with valid input & expected output).
+ * Called by: submitForReview and directApproveDraft.
+ * Assumed by: questionVersion snapshot creation and Contest question picker downstream.
+ */
+function validateQuestionDraft(draft: QuestionDraftContent, questionType: string): void {
+  if (!draft?.title?.trim()) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Title is required." });
+  }
+  if (!draft?.description?.trim()) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Description is required.",
+    });
+  }
+
+  if (questionType === "mcq") {
+    if (!draft.options || draft.options.length < 2) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "MCQ question must have at least 2 options.",
+      });
+    }
+    // Validate option IDs are unique to prevent ambiguous scoring downstream
+    const ids = draft.options.map((o) => o.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "MCQ option IDs must be unique.",
+      });
+    }
+    // Validate option text is non-empty
+    if (draft.options.some((o) => !o.text?.trim())) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "All MCQ options must have non-empty text.",
+      });
+    }
+    if (!draft.correctOptionId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "MCQ question must have a correct option specified.",
+      });
+    }
+    // Validate correctOptionId exists in options list
+    if (!draft.options.some((o) => o.id === draft.correctOptionId)) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "correctOptionId must match one of the defined options.",
+      });
+    }
+  } else if (questionType === "code") {
+    if (!draft.testCases || draft.testCases.length === 0) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Code question must have at least one test case.",
+      });
+    }
+  }
+}
+
 export const questionBankRouter = createTRPCRouter({
   // ─── Creator Endpoints ────────────────────────────────────────────────────
 
@@ -201,28 +265,8 @@ export const questionBankRouter = createTRPCRouter({
 
         const draft = target.currentDraft as QuestionDraftContent;
 
-        // Content validation
-        if (target.questionType === "mcq") {
-          if (!draft.options || draft.options.length < 2) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: "MCQ question must have at least 2 options.",
-            });
-          }
-          if (!draft.correctOptionId) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: "MCQ question must have a correct option specified.",
-            });
-          }
-        } else if (target.questionType === "code") {
-          if (!draft.testCases || draft.testCases.length === 0) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: "Code question must have at least one test case.",
-            });
-          }
-        }
+        // Content validation via shared validator
+        validateQuestionDraft(draft, target.questionType);
 
         // Determine next version number
         const lastVersions = await tx.query.questionVersion.findMany({
@@ -919,6 +963,131 @@ export const questionBankRouter = createTRPCRouter({
         });
 
         return { success: true, assignmentId };
+      });
+    }),
+
+  // Direct review and approval into Question Bank by Administrator.
+  // Mints an immutable questionVersion snapshot and sets question.status = APPROVED.
+  // Any active peer-review assignment is cancelled and a completed admin assignment is created.
+  directApproveDraft: adminProcedure
+    .input(
+      z.object({
+        questionId: z.string(),
+        comment: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      return await ctx.db.transaction(async (tx) => {
+        // 1. Fetch and verify question
+        const target = await tx.query.question.findFirst({
+          where: eq(question.id, input.questionId),
+        });
+        if (!target) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Question not found." });
+        }
+        if (
+          !["DRAFT", "CHANGES_REQUESTED", "SUBMITTED_FOR_REVIEW", "UNDER_REVIEW"].includes(
+            target.status
+          )
+        ) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Cannot approve question from current status: ${target.status}.`,
+          });
+        }
+
+        // 2. Validate draft content (shared function enforces structural completeness)
+        const draft = target.currentDraft as QuestionDraftContent;
+        if (!draft) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Question does not have any draft content to approve.",
+          });
+        }
+        validateQuestionDraft(draft, target.questionType);
+
+        // 3. Mint immutable version snapshot
+        const lastVersions = await tx.query.questionVersion.findMany({
+          where: eq(questionVersion.questionId, target.id),
+          orderBy: (qv, { desc }) => [desc(qv.version)],
+          limit: 1,
+        });
+        const nextVersionNumber = (lastVersions[0]?.version ?? 0) + 1;
+        const versionId = crypto.randomUUID();
+
+        await tx.insert(questionVersion).values({
+          id: versionId,
+          questionId: target.id,
+          version: nextVersionNumber,
+          title: draft.title,
+          description: draft.description,
+          options: draft.options ?? null,
+          correctOptionId: draft.correctOptionId ?? null,
+          hint: draft.hint ?? null,
+          questionScore: draft.questionScore ?? 10,
+          starterCode: draft.starterCode ?? null,
+          allowedLanguages: draft.allowedLanguages ?? null,
+          timeLimit: draft.timeLimit ?? 5,
+          memoryLimit: draft.memoryLimit ?? 128000,
+          testCases: draft.testCases ?? null,
+          createdById: ctx.user.id,
+        });
+
+        // 4. Cancel any active assignments (preserves reviewer audit trail without leaving orphan reviews)
+        await tx
+          .update(questionAssignment)
+          .set({ status: "CANCELLED", completedAt: new Date() })
+          .where(
+            and(
+              eq(questionAssignment.questionId, target.id),
+              inArray(questionAssignment.status, ["PENDING", "IN_REVIEW"])
+            )
+          );
+
+        // 5. Create new completed admin assignment
+        const assignmentId = crypto.randomUUID();
+        await tx.insert(questionAssignment).values({
+          id: assignmentId,
+          questionId: target.id,
+          versionId: versionId,
+          reviewerId: ctx.user.id,
+          assignedById: target.createdById,
+          status: "COMPLETED",
+          completedAt: new Date(),
+        });
+
+        // 6. Update question status to APPROVED and link currentVersionId
+        await tx
+          .update(question)
+          .set({
+            status: "APPROVED",
+            currentVersionId: versionId,
+            updatedAt: new Date(),
+          })
+          .where(eq(question.id, target.id));
+
+        // 7. Insert review comment on the new admin assignment for conversation continuity
+        await tx.insert(reviewComment).values({
+          id: crypto.randomUUID(),
+          questionId: target.id,
+          assignmentId: assignmentId,
+          userId: ctx.user.id,
+          message:
+            input.comment?.trim() ||
+            "Reviewed and approved directly into Question Bank by Administrator.",
+        });
+
+        // 8. Audit log for compliance
+        await tx.insert(auditLog).values({
+          id: crypto.randomUUID(),
+          userId: ctx.user.id,
+          action: "ADMIN_DIRECT_APPROVED",
+          entityType: "question",
+          entityId: target.id,
+          metadata: { version: nextVersionNumber, versionId, assignmentId },
+        });
+
+        return { success: true, versionId, version: nextVersionNumber, assignmentId };
       });
     }),
 

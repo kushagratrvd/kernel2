@@ -1,8 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTRPC } from "@/trpc/client";
+import { authClient } from "@/lib/auth-client";
+import { getUserRoles } from "@/lib/get-user-roles";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -43,7 +55,30 @@ export function QuestionDetailModal({
   onSubmitForReview,
 }: QuestionDetailModalProps) {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const { data: session } = authClient.useSession();
+  const roles = getUserRoles(session?.user);
+  const isAdmin = roles.includes("admin");
+
   const [viewMode, setViewMode] = useState<"split" | "spec" | "review">("split");
+  const [confirmApproveOpen, setConfirmApproveOpen] = useState(false);
+  const [adminComment, setAdminComment] = useState("");
+
+  const directApproveMutation = useMutation(
+    trpc.questionBank.directApproveDraft.mutationOptions({
+      onSuccess: () => {
+        toast.success("Question approved and published to Question Bank!");
+        queryClient.invalidateQueries(trpc.questionBank.listMyQuestions.pathFilter());
+        queryClient.invalidateQueries(trpc.questionBank.listQuestionBank.pathFilter());
+        setConfirmApproveOpen(false);
+        setAdminComment("");
+        refetch();
+      },
+      onError: (err) => {
+        toast.error(err.message || "Failed to directly approve question.");
+      },
+    })
+  );
 
   const { data: q, isLoading, refetch } = useQuery(
     trpc.questionBank.getQuestion.queryOptions(
@@ -218,11 +253,32 @@ export function QuestionDetailModal({
             }
           : undefined
       }
+      isAdmin={isAdmin}
+      onDirectApprove={() => setConfirmApproveOpen(true)}
+      isDirectApproving={directApproveMutation.isPending}
     />
   );
 
+  const canDirectApprove =
+    isAdmin &&
+    Boolean(
+      q?.status &&
+        ["DRAFT", "CHANGES_REQUESTED", "SUBMITTED_FOR_REVIEW", "UNDER_REVIEW"].includes(
+          q.status
+        )
+    );
+
+  const handleConfirmDirectApprove = () => {
+    if (!questionId) return;
+    directApproveMutation.mutate({
+      questionId,
+      comment: adminComment.trim() || undefined,
+    });
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <>
+      <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="!w-[96vw] !max-w-[1550px] sm:!max-w-[1550px] h-[92vh] max-h-[92vh] flex flex-col p-0 overflow-hidden rounded-3xl bg-background border border-border/50 shadow-2xl">
         {/* Header */}
         <DialogHeader className="px-6 py-4 border-b border-border/40 bg-card/60 shrink-0">
@@ -257,8 +313,21 @@ export function QuestionDetailModal({
               </DialogTitle>
             </div>
 
-            {/* View Mode Switcher */}
-            <div className="flex items-center gap-1.5 p-1 bg-muted/40 rounded-xl border border-border/40 self-start sm:self-auto shrink-0">
+            {/* View Mode Switcher and Admin Actions */}
+            <div className="flex items-center gap-2 self-start sm:self-auto shrink-0 flex-wrap">
+              {canDirectApprove && (
+                <Button
+                  size="sm"
+                  onClick={() => setConfirmApproveOpen(true)}
+                  disabled={directApproveMutation.isPending}
+                  className="rounded-xl gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs"
+                >
+                  <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-4" />
+                  Approve to Question Bank
+                </Button>
+              )}
+
+              <div className="flex items-center gap-1.5 p-1 bg-muted/40 rounded-xl border border-border/40 shrink-0">
               <button
                 type="button"
                 onClick={() => setViewMode("split")}
@@ -300,6 +369,7 @@ export function QuestionDetailModal({
                 <HugeiconsIcon icon={ViewIcon} className="size-3.5" />
                 Question Details
               </button>
+              </div>
             </div>
           </div>
         </DialogHeader>
@@ -343,5 +413,47 @@ export function QuestionDetailModal({
         )}
       </DialogContent>
     </Dialog>
+
+    {/* Direct Approval Confirmation Dialog */}
+    <AlertDialog open={confirmApproveOpen} onOpenChange={setConfirmApproveOpen}>
+      <AlertDialogContent className="rounded-3xl max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle className="flex items-center gap-2 text-foreground font-bold">
+            <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-5 text-emerald-500" />
+            Approve to Question Bank?
+          </AlertDialogTitle>
+          <AlertDialogDescription className="text-muted-foreground text-xs leading-relaxed pt-2">
+            This will approve the current draft and create an immutable question version. Any active peer-review assignment will be cancelled.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="space-y-2 py-2">
+          <label className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Optional Admin Review Note
+          </label>
+          <Textarea
+            placeholder="e.g., Reviewed and verified by Admin. Ready for contest."
+            value={adminComment}
+            onChange={(e) => setAdminComment(e.target.value)}
+            className="rounded-xl text-xs bg-muted/20 resize-none h-20"
+          />
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogCancel
+            disabled={directApproveMutation.isPending}
+            className="rounded-xl text-xs"
+          >
+            Cancel
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={handleConfirmDirectApprove}
+            disabled={directApproveMutation.isPending}
+            className="rounded-xl text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+          >
+            {directApproveMutation.isPending ? "Approving..." : "Confirm & Approve"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

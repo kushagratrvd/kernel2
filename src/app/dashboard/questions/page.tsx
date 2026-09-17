@@ -25,8 +25,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTRPC } from "@/trpc/client";
+import { getUserRoles } from "@/lib/get-user-roles";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   AddCircleIcon,
@@ -62,7 +74,10 @@ function QuestionsStudioContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const { data: session } = authClient.useSession();
+  const roles = getUserRoles(session?.user);
+  const isAdmin = roles.includes("admin");
 
   const [activeStatusTab, setActiveStatusTab] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
@@ -71,8 +86,25 @@ function QuestionsStudioContent() {
   const [isSubmitOpen, setIsSubmitOpen] = useState(false);
   const [selectedQuestionForSubmit, setSelectedQuestionForSubmit] = useState<string | null>(null);
   const [selectedDetailQuestionId, setSelectedDetailQuestionId] = useState<string | null>(null);
+  const [directApproveQuestionId, setDirectApproveQuestionId] = useState<string | null>(null);
+  const [directApproveComment, setDirectApproveComment] = useState("");
   const [selectedReviewerId, setSelectedReviewerId] = useState<string>("");
   const [submitComment, setSubmitComment] = useState<string>("");
+
+  const directApproveMutation = useMutation(
+    trpc.questionBank.directApproveDraft.mutationOptions({
+      onSuccess: () => {
+        toast.success("Question approved and added to Question Bank!");
+        queryClient.invalidateQueries(trpc.questionBank.listMyQuestions.pathFilter());
+        queryClient.invalidateQueries(trpc.questionBank.listQuestionBank.pathFilter());
+        setDirectApproveQuestionId(null);
+        setDirectApproveComment("");
+      },
+      onError: (err) => {
+        toast.error(err.message || "Failed to approve question directly.");
+      },
+    })
+  );
 
   // Editor form state
   const [questionType, setQuestionType] = useState<QuestionType>("mcq");
@@ -462,6 +494,20 @@ function QuestionsStudioContent() {
                             <HugeiconsIcon icon={ViewIcon} className="size-3 text-purple-500" />
                             View & Review
                           </Button>
+
+                          {isAdmin &&
+                            ["DRAFT", "CHANGES_REQUESTED", "SUBMITTED_FOR_REVIEW", "UNDER_REVIEW"].includes(
+                              q.status
+                            ) && (
+                              <Button
+                                size="xs"
+                                onClick={() => setDirectApproveQuestionId(q.id)}
+                                className="rounded-xl gap-1 bg-emerald-600 hover:bg-emerald-700 text-white text-2xs font-semibold shadow-xs"
+                              >
+                                <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-3" />
+                                Approve to Bank
+                              </Button>
+                            )}
 
                           {(q.status === "DRAFT" || q.status === "CHANGES_REQUESTED") && (
                             <Button
@@ -914,6 +960,61 @@ function QuestionsStudioContent() {
         }}
         onSubmitForReview={(qId) => handleOpenSubmit(qId)}
       />
+
+      {/* Admin Direct Approval Confirmation Dialog */}
+      <AlertDialog
+        open={Boolean(directApproveQuestionId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDirectApproveQuestionId(null);
+            setDirectApproveComment("");
+          }
+        }}
+      >
+        <AlertDialogContent className="rounded-3xl max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-foreground font-bold">
+              <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-5 text-emerald-500" />
+              Approve to Question Bank?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground text-xs leading-relaxed pt-2">
+              This will approve the current draft and create an immutable question version. Any active peer-review assignment will be cancelled.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2 py-2">
+            <label className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Optional Admin Review Note
+            </label>
+            <Textarea
+              placeholder="e.g., Reviewed and verified by Admin. Ready for contest."
+              value={directApproveComment}
+              onChange={(e) => setDirectApproveComment(e.target.value)}
+              className="rounded-xl text-xs bg-muted/20 resize-none h-20"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={directApproveMutation.isPending}
+              className="rounded-xl text-xs"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!directApproveQuestionId) return;
+                directApproveMutation.mutate({
+                  questionId: directApproveQuestionId,
+                  comment: directApproveComment.trim() || undefined,
+                });
+              }}
+              disabled={directApproveMutation.isPending}
+              className="rounded-xl text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+            >
+              {directApproveMutation.isPending ? "Approving..." : "Confirm & Approve"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

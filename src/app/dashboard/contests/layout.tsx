@@ -4,20 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { Spinner } from "@/components/ui/spinner";
-
-function getUserRoles(user: any): string[] {
-  if (Array.isArray(user?.roles)) return user.roles;
-  if (typeof user?.roles === "string") {
-    try {
-      const parsed = JSON.parse(user.roles);
-      if (Array.isArray(parsed)) return parsed;
-    } catch {
-      return [user.roles];
-    }
-  }
-  if (user?.role && typeof user.role === "string") return [user.role];
-  return ["student"];
-}
+import { getUserRoles } from "@/lib/get-user-roles";
 
 export default function ContestsAdminLayout({
   children,
