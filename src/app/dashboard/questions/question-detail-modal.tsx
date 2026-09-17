@@ -15,6 +15,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
+import { QuestionStatusBadge } from "@/components/questions/question-status-badge";
+import { ReviewDiscussionThread } from "@/components/questions/review-discussion-thread";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Comment01Icon,
@@ -42,7 +44,6 @@ export function QuestionDetailModal({
 }: QuestionDetailModalProps) {
   const trpc = useTRPC();
   const [viewMode, setViewMode] = useState<"split" | "spec" | "review">("split");
-  const [replyMessage, setReplyMessage] = useState("");
 
   const { data: q, isLoading, refetch } = useQuery(
     trpc.questionBank.getQuestion.queryOptions(
@@ -51,31 +52,12 @@ export function QuestionDetailModal({
     )
   );
 
-  // Add Comment Mutation
-  const addCommentMutation = useMutation(
-    trpc.questionBank.addComment.mutationOptions({
-      onSuccess: () => {
-        setReplyMessage("");
-        toast.success("Reply posted to review thread.");
-        refetch();
-      },
-      onError: (err) => {
-        toast.error(err.message);
-      },
-    })
-  );
-
   if (!open || !questionId) return null;
 
   // Active or latest assignment
   const latestAssignment = q?.assignments?.[0];
-  const allComments = q?.assignments?.flatMap((a) =>
-    (a.comments || []).map((c) => ({
-      ...c,
-      assignmentStatus: a.status,
-      reviewerId: a.reviewerId,
-    }))
-  ).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) || [];
+  const commentCount =
+    q?.assignments?.reduce((acc, a) => acc + (a.comments?.length || 0), 0) || 0;
 
   const draft = (q?.currentDraft as any) || {};
   const currentVersion = q?.currentVersion;
@@ -88,32 +70,6 @@ export function QuestionDetailModal({
   const displayTestCases = currentVersion?.testCases || draft?.testCases;
   const timeLimit = currentVersion?.timeLimit ?? draft?.timeLimit ?? 5;
   const memoryLimit = currentVersion?.memoryLimit ?? draft?.memoryLimit ?? 128000;
-
-  const handleSendReply = async () => {
-    if (!latestAssignment || !replyMessage.trim()) return;
-    await addCommentMutation.mutateAsync({
-      questionId,
-      assignmentId: latestAssignment.id,
-      message: replyMessage.trim(),
-    });
-  };
-
-  const getStatusBadge = (status?: string) => {
-    switch (status) {
-      case "APPROVED":
-        return <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/30 text-2xs font-bold uppercase">Approved</Badge>;
-      case "CHANGES_REQUESTED":
-        return <Badge variant="outline" className="bg-amber-500/10 text-amber-500 border-amber-500/30 text-2xs font-bold uppercase">Changes Requested</Badge>;
-      case "UNDER_REVIEW":
-        return <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/30 text-2xs font-bold uppercase">Under Review</Badge>;
-      case "SUBMITTED_FOR_REVIEW":
-        return <Badge variant="outline" className="bg-purple-500/10 text-purple-500 border-purple-500/30 text-2xs font-bold uppercase">Submitted</Badge>;
-      case "REJECTED":
-        return <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/30 text-2xs font-bold uppercase">Rejected</Badge>;
-      default:
-        return <Badge variant="outline" className="bg-muted text-muted-foreground text-2xs font-bold uppercase">Draft</Badge>;
-    }
-  };
 
   // Sub-component: Question Specification Panel
   const renderQuestionSpec = () => (
@@ -247,203 +203,22 @@ export function QuestionDetailModal({
 
   // Sub-component: Review & Conversation Panel
   const renderReviewThread = () => (
-    <div className="space-y-5">
-      {/* State Guidance Banner */}
-      {q?.status === "CHANGES_REQUESTED" && (
-        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 space-y-2">
-          <div className="flex items-center gap-2 text-amber-500 font-bold text-sm">
-            <HugeiconsIcon icon={AlertCircleIcon} className="size-4 shrink-0" />
-            Changes Requested by Reviewer
-          </div>
-          <p className="text-xs text-amber-400/90 leading-relaxed">
-            The reviewer requested adjustments before this question can be approved.
-            Read the comments below and re-submit when updated.
-          </p>
-          {onSubmitForReview && (
-            <div className="pt-1.5">
-              <Button
-                size="sm"
-                onClick={() => {
-                  onClose();
-                  onSubmitForReview(questionId);
-                }}
-                className="rounded-xl gap-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white shadow-sm"
-              >
-                <HugeiconsIcon icon={SentIcon} className="size-3.5" />
-                Re-submit Question to Reviewer
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {q?.status === "APPROVED" && (
-        <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-4 flex items-center gap-3">
-          <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-5 text-green-500 shrink-0" />
-          <div>
-            <h4 className="text-sm font-bold text-green-400">Question Approved</h4>
-            <p className="text-xs text-green-400/80">
-              Verified and approved by the reviewer. Live in the Question Bank for contests.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {q?.status === "UNDER_REVIEW" && (
-        <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-4 flex items-center gap-3">
-          <HugeiconsIcon icon={HourglassIcon} className="size-5 text-blue-500 shrink-0 animate-pulse" />
-          <div>
-            <h4 className="text-sm font-bold text-blue-400">Currently Under Review</h4>
-            <p className="text-xs text-blue-400/80">
-              {latestAssignment?.reviewer?.name || latestAssignment?.reviewer?.email || "A reviewer"} is reviewing this question.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {q?.status === "SUBMITTED_FOR_REVIEW" && (
-        <div className="rounded-2xl border border-purple-500/30 bg-purple-500/10 p-4 flex items-center gap-3">
-          <HugeiconsIcon icon={HourglassIcon} className="size-5 text-purple-500 shrink-0" />
-          <div>
-            <h4 className="text-sm font-bold text-purple-400">Submitted for Review</h4>
-            <p className="text-xs text-purple-400/80">
-              Assigned to {latestAssignment?.reviewer?.name || latestAssignment?.reviewer?.email || "reviewer"}. Waiting for pickup.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {q?.status === "DRAFT" && (
-        <div className="rounded-2xl border border-border/40 bg-muted/20 p-4 flex items-center justify-between gap-4">
-          <div>
-            <h4 className="text-sm font-bold text-foreground">Working Draft</h4>
-            <p className="text-xs text-muted-foreground">
-              Not yet submitted for review.
-            </p>
-          </div>
-          {onSubmitForReview && (
-            <Button
-              size="sm"
-              onClick={() => {
-                onClose();
-                onSubmitForReview(questionId);
-              }}
-              className="rounded-xl gap-1.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
-            >
-              <HugeiconsIcon icon={SentIcon} className="size-3.5" />
-              Submit for Review
-            </Button>
-          )}
-        </div>
-      )}
-
-      {/* Reviewer Assignment Meta */}
-      {latestAssignment && (
-        <div className="rounded-2xl border border-border/30 bg-muted/15 p-3.5 flex items-center justify-between text-xs">
-          <div className="space-y-0.5">
-            <span className="text-3xs uppercase font-bold text-muted-foreground tracking-wider">Reviewer</span>
-            <p className="font-semibold text-foreground">
-              {latestAssignment.reviewer?.name || latestAssignment.reviewer?.email || "Unassigned"}
-            </p>
-          </div>
-          <div className="space-y-0.5 text-right">
-            <span className="text-3xs uppercase font-bold text-muted-foreground tracking-wider">Status</span>
-            <p className="font-mono font-semibold text-foreground">{latestAssignment.status}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Conversation Timeline */}
-      <div className="space-y-3">
-        <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-          <HugeiconsIcon icon={Comment01Icon} className="size-4" />
-          Review Discussion ({allComments.length})
-        </h4>
-
-        {allComments.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-border/50 p-8 text-center text-xs text-muted-foreground space-y-1">
-            <p className="font-semibold">No comments in this thread yet.</p>
-            <p className="text-3xs">Reviewer notes, requested changes, and answers will appear here.</p>
-          </div>
-        ) : (
-          <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
-            {allComments.map((c, idx) => {
-              const isCreator = c.user?.id === q?.createdById;
-              const formattedDate = new Date(c.createdAt).toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              });
-
-              return (
-                <div
-                  key={c.id || idx}
-                  className={`rounded-2xl p-4 border transition-all ${
-                    isCreator
-                      ? "bg-muted/20 border-border/40 ml-4"
-                      : "bg-purple-500/5 border-purple-500/20 mr-4"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-xs text-foreground">
-                        {c.user?.name || c.user?.email || "Unknown User"}
-                      </span>
-                      <Badge
-                        variant="outline"
-                        className={`text-3xs px-1.5 py-0 font-bold ${
-                          isCreator
-                            ? "bg-muted text-muted-foreground"
-                            : "bg-purple-500/20 text-purple-400 border-purple-500/30"
-                        }`}
-                      >
-                        {isCreator ? "Creator" : "Reviewer"}
-                      </Badge>
-                    </div>
-                    <span className="text-3xs font-mono text-muted-foreground">
-                      {formattedDate}
-                    </span>
-                  </div>
-                  <p className="text-xs whitespace-pre-wrap leading-relaxed text-foreground/90">
-                    {c.message}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Reply Form */}
-      {latestAssignment && (
-        <div className="rounded-2xl border border-border/40 bg-card p-4 space-y-3 shadow-xs">
-          <span className="text-xs font-semibold text-foreground">Reply to Reviewer</span>
-          <Textarea
-            placeholder="Type your reply or explanation for the reviewer..."
-            value={replyMessage}
-            onChange={(e) => setReplyMessage(e.target.value)}
-            rows={3}
-            className="rounded-xl resize-none text-xs"
-          />
-          <div className="flex justify-end">
-            <Button
-              size="sm"
-              disabled={addCommentMutation.isPending || !replyMessage.trim()}
-              onClick={handleSendReply}
-              className="rounded-xl gap-1.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
-            >
-              {addCommentMutation.isPending ? (
-                <Spinner className="size-3.5" />
-              ) : (
-                <HugeiconsIcon icon={SentIcon} className="size-3.5" />
-              )}
-              Send Reply
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
+    <ReviewDiscussionThread
+      questionId={questionId}
+      assignmentId={latestAssignment?.id}
+      creatorId={q?.createdById}
+      questionStatus={q?.status}
+      assignmentStatus={latestAssignment?.status}
+      onCommentAdded={() => refetch()}
+      onSubmitForReview={
+        onSubmitForReview
+          ? (id) => {
+              onClose();
+              onSubmitForReview(id);
+            }
+          : undefined
+      }
+    />
   );
 
   return (
@@ -457,7 +232,7 @@ export function QuestionDetailModal({
                 <span className="uppercase text-2xs font-mono font-bold px-2 py-0.5 rounded bg-muted">
                   {q?.questionType || "question"}
                 </span>
-                {getStatusBadge(q?.status)}
+                <QuestionStatusBadge status={q?.status} />
                 {q?.currentVersion && (
                   <code className="text-2xs font-mono font-bold px-2 py-0.5 rounded bg-muted/60 text-muted-foreground">
                     v{q.currentVersion.version}
@@ -507,9 +282,9 @@ export function QuestionDetailModal({
               >
                 <HugeiconsIcon icon={Comment01Icon} className="size-3.5 text-purple-500" />
                 Review & Feedback
-                {allComments.length > 0 && (
+                {commentCount > 0 && (
                   <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-3xs font-mono bg-purple-500/20 text-purple-400">
-                    {allComments.length}
+                    {commentCount}
                   </span>
                 )}
               </button>

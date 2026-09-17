@@ -31,6 +31,11 @@ import {
 } from "@hugeicons/core-free-icons";
 import { ModeToggle } from "@/components/ui/mode-toggle";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
+import {
+  QuestionStatusBadge,
+  ReviewAssignmentStatusBadge,
+} from "@/components/questions/question-status-badge";
+import { ReviewDiscussionThread } from "@/components/questions/review-discussion-thread";
 import { toast } from "sonner";
 
 function ReviewDeskContent() {
@@ -239,97 +244,6 @@ function ReviewDeskContent() {
       assignmentId: activeAssignment.id,
       comment: actionComment.trim(),
     });
-  };
-
-  const handleSendComment = async () => {
-    if (!activeAssignment || !replyMessage.trim()) return;
-    await addCommentMutation.mutateAsync({
-      questionId: activeAssignment.questionId,
-      assignmentId: activeAssignment.id,
-      message: replyMessage.trim(),
-    });
-  };
-
-  // Accurate Status Badge Renderer
-  const renderStatusBadge = (a: any, tab: "assigned" | "history") => {
-    // If in Review History or completed assignment, show the question's actual decision status
-    if (tab === "history" || a.status === "COMPLETED" || a.status === "CANCELLED") {
-      const qStatus = a.question?.status;
-      if (qStatus === "CHANGES_REQUESTED") {
-        return (
-          <Badge
-            variant="outline"
-            className="bg-amber-500/10 text-amber-500 border-amber-500/30 text-2xs font-bold uppercase gap-1"
-          >
-            <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
-            Changes Requested
-          </Badge>
-        );
-      }
-      if (qStatus === "APPROVED") {
-        return (
-          <Badge
-            variant="outline"
-            className="bg-green-500/10 text-green-500 border-green-500/30 text-2xs font-bold uppercase gap-1"
-          >
-            <span className="size-1.5 rounded-full bg-green-500" />
-            Approved
-          </Badge>
-        );
-      }
-      if (qStatus === "REJECTED") {
-        return (
-          <Badge
-            variant="outline"
-            className="bg-red-500/10 text-red-500 border-red-500/30 text-2xs font-bold uppercase gap-1"
-          >
-            <span className="size-1.5 rounded-full bg-red-500" />
-            Rejected
-          </Badge>
-        );
-      }
-      if (a.status === "CANCELLED") {
-        return (
-          <Badge
-            variant="outline"
-            className="bg-muted text-muted-foreground text-2xs font-bold uppercase"
-          >
-            Cancelled
-          </Badge>
-        );
-      }
-      return (
-        <Badge
-          variant="outline"
-          className="bg-green-500/10 text-green-500 border-green-500/30 text-2xs font-bold uppercase"
-        >
-          {qStatus ? qStatus.replace(/_/g, " ") : "Completed"}
-        </Badge>
-      );
-    }
-
-    // In Assigned Queue
-    if (a.status === "IN_REVIEW") {
-      return (
-        <Badge
-          variant="outline"
-          className="bg-blue-500/10 text-blue-500 border-blue-500/30 text-2xs font-bold uppercase gap-1"
-        >
-          <span className="size-1.5 rounded-full bg-blue-500 animate-pulse" />
-          In Review
-        </Badge>
-      );
-    }
-
-    return (
-      <Badge
-        variant="outline"
-        className="bg-yellow-500/10 text-yellow-500 border-yellow-500/30 text-2xs font-bold uppercase gap-1"
-      >
-        <span className="size-1.5 rounded-full bg-yellow-500" />
-        Pending Pickup
-      </Badge>
-    );
   };
 
   const isCurrentLoading = activeTab === "assigned" ? isAssignedLoading : isHistoryLoading;
@@ -553,7 +467,9 @@ function ReviewDeskContent() {
                       </td>
 
                       {/* Status */}
-                      <td className="p-4">{renderStatusBadge(a, activeTab)}</td>
+                      <td className="p-4">
+                        <ReviewAssignmentStatusBadge assignment={a} tab={activeTab} />
+                      </td>
 
                       {/* Action */}
                       <td className="p-4 text-right" onClick={(e) => e.stopPropagation()}>
@@ -627,7 +543,10 @@ function ReviewDeskContent() {
                     <code className="text-2xs font-mono font-bold px-2 py-0.5 rounded bg-muted text-muted-foreground">
                       Version {activeAssignment.version?.version || 1}
                     </code>
-                    {renderStatusBadge(activeAssignment, activeTab)}
+                    <ReviewAssignmentStatusBadge
+                      assignment={activeAssignment}
+                      tab={activeTab}
+                    />
                   </div>
                   <DialogTitle className="text-xl font-black text-foreground">
                     {activeAssignment.version?.title || "Question Snapshot"}
@@ -876,180 +795,18 @@ function ReviewDeskContent() {
                       modalViewMode === "chat" ? "lg:col-span-12" : "lg:col-span-5"
                     } h-full flex flex-col bg-muted/5`}
                   >
-                    {/* Discussion Status Guidance Banner */}
-                    <div className="p-4 border-b border-border/20 bg-muted/20">
-                      {activeAssignment.question?.status === "CHANGES_REQUESTED" && (
-                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-1">
-                          <div className="flex items-center gap-1.5 text-amber-500 font-bold text-xs">
-                            <HugeiconsIcon icon={AlertCircleIcon} className="size-4 shrink-0" />
-                            Changes Requested from Creator
-                          </div>
-                          <p className="text-2xs text-amber-400/90">
-                            The creator was asked to revise this question according to the feedback
-                            messages below.
-                          </p>
-                        </div>
-                      )}
-
-                      {activeAssignment.question?.status === "APPROVED" && (
-                        <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-3 flex items-center gap-2.5">
-                          <HugeiconsIcon
-                            icon={CheckmarkCircle02Icon}
-                            className="size-4 text-green-500 shrink-0"
-                          />
-                          <div>
-                            <h5 className="text-xs font-bold text-green-400">Question Approved</h5>
-                            <p className="text-2xs text-green-400/80">
-                              Approved into the question bank and available for contest builders.
-                            </p>
-                          </div>
-                        </div>
-                      )}
-
-                      {activeAssignment.question?.status === "REJECTED" && (
-                        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 flex items-center gap-2.5">
-                          <HugeiconsIcon
-                            icon={AlertCircleIcon}
-                            className="size-4 text-red-500 shrink-0"
-                          />
-                          <div>
-                            <h5 className="text-xs font-bold text-red-400">Question Rejected</h5>
-                            <p className="text-2xs text-red-400/80">
-                              This question submission was rejected by the reviewer.
-                            </p>
-                          </div>
-                        </div>
-                      )}
-
-                      {activeAssignment.status === "IN_REVIEW" && (
-                        <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-3 flex items-center gap-2.5">
-                          <HugeiconsIcon
-                            icon={HourglassIcon}
-                            className="size-4 text-blue-500 shrink-0 animate-pulse"
-                          />
-                          <div>
-                            <h5 className="text-xs font-bold text-blue-400">Under Review</h5>
-                            <p className="text-2xs text-blue-400/80">
-                              You are currently reviewing this snapshot. Communicate or finalize your
-                              verdict above.
-                            </p>
-                          </div>
-                        </div>
-                      )}
-
-                      {activeAssignment.status === "PENDING" && (
-                        <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-3 flex items-center gap-2.5">
-                          <HugeiconsIcon
-                            icon={HourglassIcon}
-                            className="size-4 text-yellow-500 shrink-0"
-                          />
-                          <div>
-                            <h5 className="text-xs font-bold text-yellow-400">Waiting for Pickup</h5>
-                            <p className="text-2xs text-yellow-400/80">
-                              Pick up this question to begin evaluation.
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Chat Messages Stream */}
-                    <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                      <div className="flex items-center justify-between pb-1">
-                        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                          <HugeiconsIcon icon={Comment01Icon} className="size-3.5" />
-                          Review Discussion ({reviewThread?.length || 0})
-                        </span>
-                      </div>
-
-                      {isThreadLoading ? (
-                        <div className="flex py-12 items-center justify-center">
-                          <Spinner className="size-5" />
-                        </div>
-                      ) : !reviewThread || reviewThread.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-border/50 p-8 text-center text-xs text-muted-foreground space-y-1">
-                          <p className="font-semibold">No comments in this thread yet.</p>
-                          <p className="text-3xs">
-                            Reviewer notes, requested changes, and creator replies will appear here.
-                          </p>
-                        </div>
-                      ) : (
-                        reviewThread.map((c) => {
-                          const isCreator =
-                            c.user?.id === activeAssignment.question?.createdById;
-                          const formattedDate = new Date(c.createdAt).toLocaleString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          });
-
-                          return (
-                            <div
-                              key={c.id}
-                              className={`rounded-2xl p-3.5 border transition-all text-left ${
-                                isCreator
-                                  ? "bg-muted/30 border-border/40 ml-2"
-                                  : "bg-purple-500/5 border-purple-500/20 mr-2"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between mb-1.5">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-bold text-xs text-foreground">
-                                    {c.user?.name || c.user?.email || "Unknown User"}
-                                  </span>
-                                  <Badge
-                                    variant="outline"
-                                    className={`text-3xs px-1.5 py-0 font-bold ${
-                                      isCreator
-                                        ? "bg-muted text-muted-foreground"
-                                        : "bg-purple-500/20 text-purple-400 border-purple-500/30"
-                                    }`}
-                                  >
-                                    {isCreator ? "Creator" : "Reviewer"}
-                                  </Badge>
-                                </div>
-                                <span className="text-3xs font-mono text-muted-foreground">
-                                  {formattedDate}
-                                </span>
-                              </div>
-                              <p className="text-xs whitespace-pre-wrap leading-relaxed text-foreground/90">
-                                {c.message}
-                              </p>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-
-                    {/* Interactive Reply Input Form */}
-                    <div className="p-4 border-t border-border/30 bg-background/80 backdrop-blur-md space-y-2.5">
-                      <span className="text-xs font-semibold text-foreground">
-                        Reply or Send Reviewer Note
-                      </span>
-                      <Textarea
-                        placeholder="Type your response or clarification for the creator..."
-                        value={replyMessage}
-                        onChange={(e) => setReplyMessage(e.target.value)}
-                        rows={2}
-                        className="rounded-xl resize-none text-xs"
-                      />
-                      <div className="flex justify-end">
-                        <Button
-                          size="sm"
-                          disabled={addCommentMutation.isPending || !replyMessage.trim()}
-                          onClick={handleSendComment}
-                          className="rounded-xl gap-1.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
-                        >
-                          {addCommentMutation.isPending ? (
-                            <Spinner className="size-3.5" />
-                          ) : (
-                            <HugeiconsIcon icon={SentIcon} className="size-3.5" />
-                          )}
-                          Send Reply
-                        </Button>
-                      </div>
-                    </div>
+                    <ReviewDiscussionThread
+                      questionId={activeAssignment.questionId}
+                      assignmentId={activeAssignment.id}
+                      creatorId={activeAssignment.question?.createdById}
+                      questionStatus={activeAssignment.question?.status}
+                      assignmentStatus={activeAssignment.status}
+                      onCommentAdded={() => {
+                        refetchAssigned();
+                        refetchHistory();
+                        refetchThread();
+                      }}
+                    />
                   </div>
                 )}
               </div>

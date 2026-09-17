@@ -41,6 +41,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { ModeToggle } from "@/components/ui/mode-toggle";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
+import { QuestionStatusBadge } from "@/components/questions/question-status-badge";
 import { QuestionDetailModal } from "./question-detail-modal";
 
 type QuestionType = "mcq" | "text" | "code";
@@ -248,70 +249,6 @@ function QuestionsStudioContent() {
     return items;
   }, [myQuestions, searchQuery, typeFilter]);
 
-  const renderQuestionStatusBadge = (status: string) => {
-    switch (status) {
-      case "APPROVED":
-        return (
-          <Badge
-            variant="outline"
-            className="bg-green-500/10 text-green-500 border-green-500/30 text-2xs font-bold uppercase gap-1"
-          >
-            <span className="size-1.5 rounded-full bg-green-500" />
-            Approved
-          </Badge>
-        );
-      case "CHANGES_REQUESTED":
-        return (
-          <Badge
-            variant="outline"
-            className="bg-amber-500/10 text-amber-500 border-amber-500/30 text-2xs font-bold uppercase gap-1"
-          >
-            <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
-            Changes Requested
-          </Badge>
-        );
-      case "UNDER_REVIEW":
-        return (
-          <Badge
-            variant="outline"
-            className="bg-blue-500/10 text-blue-500 border-blue-500/30 text-2xs font-bold uppercase gap-1"
-          >
-            <span className="size-1.5 rounded-full bg-blue-500 animate-pulse" />
-            Under Review
-          </Badge>
-        );
-      case "SUBMITTED_FOR_REVIEW":
-        return (
-          <Badge
-            variant="outline"
-            className="bg-purple-500/10 text-purple-500 border-purple-500/30 text-2xs font-bold uppercase gap-1"
-          >
-            <span className="size-1.5 rounded-full bg-purple-500" />
-            Submitted
-          </Badge>
-        );
-      case "REJECTED":
-        return (
-          <Badge
-            variant="outline"
-            className="bg-red-500/10 text-red-500 border-red-500/30 text-2xs font-bold uppercase gap-1"
-          >
-            <span className="size-1.5 rounded-full bg-red-500" />
-            Rejected
-          </Badge>
-        );
-      default:
-        return (
-          <Badge
-            variant="outline"
-            className="bg-muted text-muted-foreground text-2xs font-bold uppercase"
-          >
-            Draft
-          </Badge>
-        );
-    }
-  };
-
   const renderDifficultyBadge = (diff?: string) => {
     switch (diff) {
       case "easy":
@@ -510,7 +447,7 @@ function QuestionsStudioContent() {
 
                       {/* Status */}
                       <td className="p-4">
-                        {renderQuestionStatusBadge(q.status)}
+                        <QuestionStatusBadge status={q.status} />
                       </td>
 
                       {/* Action */}
