@@ -7,11 +7,11 @@
 
 ## 1. 5-Line Session Summary (Current Session)
 
-- What was done: Implemented Admin Direct Question Approval with cancel-and-create assignment pattern, shared draft validation (`validateQuestionDraft`), shared client `getUserRoles`, and confirmation dialogs in table and modal.
-- What was committed: `b42d601` (`feat: admin direct question approval with immutable snapshot minting and assignment cancel-and-create pattern`), `1436538` (`docs update`).
+- What was done: Implemented Admin Direct Question Approval, shared draft validation, shared client `getUserRoles`, and added horizontal sliders (`overflow-x-auto`, `min-w-[1100px]`, `whitespace-nowrap`) to Question Studio and Reviewer Desk tables to prevent action button clipping.
+- What was committed: `b42d601`, `1436538`, `0b10ffb`, `52e9b4a`.
 - Build state: Verified `pnpm exec tsc --noEmit` with 0 type errors.
 - What's left: Browser smoke test of direct approval flow and contest picker integration.
-- What to watch out for: Direct approval cancels active assignments without deleting them, preserving the audit trail while moving questions straight to `APPROVED`.
+- What to watch out for: Tables use an inner `overflow-x-auto` wrapper with `min-w-[1100px]` to maintain rounded borders while allowing full horizontal sliding.
 
 ---
 

@@ -375,22 +375,23 @@ function ReviewDeskContent() {
         ) : (
           /* Structured Table Form (Just like Dashboard) */
           <div className="overflow-hidden rounded-2xl border border-border/30 bg-card shadow-sm">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead>
-                <tr className="border-b border-border/30 bg-muted/30 font-semibold text-muted-foreground text-xs">
-                  <th className="p-4">Question Title</th>
-                  <th className="p-4">Type</th>
-                  <th className="p-4">Version</th>
-                  <th className="p-4">Category / Topic</th>
-                  <th className="p-4">Creator</th>
-                  {isAdmin && <th className="p-4">Reviewer</th>}
-                  <th className="p-4">
-                    {activeTab === "assigned" ? "Assigned Date" : "Reviewed Date"}
-                  </th>
-                  <th className="p-4">Status</th>
-                  <th className="p-4 text-right">Action</th>
-                </tr>
-              </thead>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1050px] border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border/30 bg-muted/30 font-semibold text-muted-foreground text-xs whitespace-nowrap">
+                    <th className="p-4 min-w-[200px]">Question Title</th>
+                    <th className="p-4">Type</th>
+                    <th className="p-4">Version</th>
+                    <th className="p-4">Category / Topic</th>
+                    <th className="p-4">Creator</th>
+                    {isAdmin && <th className="p-4">Reviewer</th>}
+                    <th className="p-4">
+                      {activeTab === "assigned" ? "Assigned Date" : "Reviewed Date"}
+                    </th>
+                    <th className="p-4">Status</th>
+                    <th className="p-4 text-right min-w-[160px]">Action</th>
+                  </tr>
+                </thead>
               <tbody className="divide-y divide-border/20">
                 {filteredList.map((a) => {
                   const commentCount = (a as any).comments?.length || 0;
@@ -472,8 +473,8 @@ function ReviewDeskContent() {
                       </td>
 
                       {/* Action */}
-                      <td className="p-4 text-right" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-2">
+                      <td className="p-4 text-right whitespace-nowrap min-w-[160px]" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-2 flex-nowrap">
                           {activeTab === "assigned" && a.status === "PENDING" && (
                             <Button
                               size="xs"
@@ -524,6 +525,7 @@ function ReviewDeskContent() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </main>

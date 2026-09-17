@@ -405,20 +405,21 @@ function QuestionsStudioContent() {
           </div>
         ) : filteredQuestions && filteredQuestions.length > 0 ? (
           <div className="overflow-hidden rounded-2xl border border-border/30 bg-card shadow-sm">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead>
-                <tr className="border-b border-border/30 bg-muted/30 font-semibold text-muted-foreground text-xs">
-                  <th className="p-4">Question Title</th>
-                  <th className="p-4">Type</th>
-                  <th className="p-4">Difficulty</th>
-                  <th className="p-4">Category / Topic</th>
-                  <th className="p-4">Score</th>
-                  <th className="p-4">Version</th>
-                  <th className="p-4">Status</th>
-                  <th className="p-4 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/20">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border/30 bg-muted/30 font-semibold text-muted-foreground text-xs whitespace-nowrap">
+                    <th className="p-4 min-w-[200px]">Question Title</th>
+                    <th className="p-4">Type</th>
+                    <th className="p-4">Difficulty</th>
+                    <th className="p-4">Category / Topic</th>
+                    <th className="p-4">Score</th>
+                    <th className="p-4">Version</th>
+                    <th className="p-4">Status</th>
+                    <th className="p-4 text-right min-w-[260px]">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/20">
                 {filteredQuestions.map((q) => {
                   const draft = q.currentDraft as any;
                   const curV = q.currentVersion;
@@ -483,8 +484,8 @@ function QuestionsStudioContent() {
                       </td>
 
                       {/* Action */}
-                      <td className="p-4 text-right" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-2">
+                      <td className="p-4 text-right whitespace-nowrap min-w-[260px]" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-2 flex-nowrap">
                           <Button
                             size="xs"
                             variant="outline"
@@ -526,6 +527,7 @@ function QuestionsStudioContent() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center border border-dashed border-border/50 rounded-3xl p-16 text-center space-y-4">
