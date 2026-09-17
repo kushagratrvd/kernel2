@@ -28,6 +28,7 @@ import {
   ViewIcon,
 } from "@hugeicons/core-free-icons";
 import { ModeToggle } from "@/components/ui/mode-toggle";
+import { MarkdownRenderer } from "@/components/markdown-renderer";
 
 function ReviewDeskContent() {
   const router = useRouter();
@@ -420,8 +421,8 @@ function ReviewDeskContent() {
                   <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                     Description & Specifications
                   </h4>
-                  <div className="p-4 rounded-2xl bg-muted/20 border border-border/30 text-sm whitespace-pre-wrap leading-relaxed">
-                    {versionDescription}
+                  <div className="p-4 rounded-2xl bg-muted/20 border border-border/30 text-sm leading-relaxed">
+                    <MarkdownRenderer content={versionDescription} />
                   </div>
                 </div>
 

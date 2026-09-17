@@ -40,6 +40,7 @@ import {
   ViewIcon,
 } from "@hugeicons/core-free-icons";
 import { ModeToggle } from "@/components/ui/mode-toggle";
+import { MarkdownRenderer } from "@/components/markdown-renderer";
 
 type QuestionType = "mcq" | "text" | "code";
 type Difficulty = "easy" | "medium" | "hard";
@@ -73,6 +74,7 @@ function QuestionsStudioContent() {
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [descTab, setDescTab] = useState<"write" | "preview">("write");
   const [hint, setHint] = useState("");
   const [questionScore, setQuestionScore] = useState(100);
   const [categoryId, setCategoryId] = useState<string>("");
@@ -240,8 +242,16 @@ function QuestionsStudioContent() {
 
         <div className="flex items-center gap-3">
           <Button
+            variant="outline"
+            onClick={() => router.push("/dashboard/questions/ai")}
+            className="gap-2 rounded-2xl text-xs font-semibold"
+          >
+            <HugeiconsIcon icon={AddCircleIcon} className="size-4" />
+            Generate with AI
+          </Button>
+          <Button
             onClick={() => setIsCreateOpen(true)}
-            className="gap-2 bg-purple-600 hover:bg-purple-700 text-white rounded-2xl shadow-sm text-xs font-semibold"
+            className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-2xl shadow-sm text-xs font-semibold"
           >
             <HugeiconsIcon icon={AddCircleIcon} className="size-4" />
             New Question Draft
@@ -339,7 +349,7 @@ function QuestionsStudioContent() {
                         <Button
                           size="xs"
                           onClick={() => handleOpenSubmit(q.id)}
-                          className="rounded-xl gap-1 bg-purple-600 hover:bg-purple-700 text-white text-2xs font-semibold"
+                          className="rounded-xl gap-1 bg-primary text-primary-foreground hover:bg-primary/90 text-2xs font-semibold"
                         >
                           <HugeiconsIcon icon={SentIcon} className="size-3" />
                           Submit to Reviewer
@@ -365,7 +375,7 @@ function QuestionsStudioContent() {
             <Button
               onClick={() => setIsCreateOpen(true)}
               size="sm"
-              className="rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs"
+              className="rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold"
             >
               + Create Question Draft
             </Button>
@@ -375,7 +385,7 @@ function QuestionsStudioContent() {
 
       {/* Create Question Modal */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl">
+        <DialogContent className="max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto rounded-3xl">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold">Create New Question Draft</DialogTitle>
           </DialogHeader>
@@ -435,14 +445,57 @@ function QuestionsStudioContent() {
 
             {/* Description */}
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">Description / Problem Statement</Label>
-              <Textarea
-                placeholder="Describe the question problem, requirements, or code specification..."
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={4}
-                className="rounded-xl resize-none"
-              />
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold">Description / Problem Statement</Label>
+                <div className="flex rounded-lg border border-border/40 p-0.5 bg-muted/30 text-2xs">
+                  <button
+                    type="button"
+                    onClick={() => setDescTab("write")}
+                    className={`px-2 py-0.5 rounded-md font-semibold transition-all ${
+                      descTab === "write"
+                        ? "bg-background text-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Write
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDescTab("preview")}
+                    className={`px-2 py-0.5 rounded-md font-semibold transition-all ${
+                      descTab === "preview"
+                        ? "bg-background text-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Preview
+                  </button>
+                </div>
+              </div>
+
+              {descTab === "write" ? (
+                <Textarea
+                  placeholder="Describe the question problem, requirements, or code specification...&#10;Tip: Embed images using ![Diagram](https://example.com/image.png)"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={5}
+                  className="rounded-xl resize-none font-mono text-xs"
+                />
+              ) : (
+                <div className="min-h-[120px] max-h-72 overflow-y-auto rounded-xl border border-border/40 bg-muted/10 p-3.5">
+                  {description.trim() ? (
+                    <MarkdownRenderer content={description} />
+                  ) : (
+                    <p className="text-xs italic text-muted-foreground">Nothing to preview yet.</p>
+                  )}
+                </div>
+              )}
+              <p className="text-3xs text-muted-foreground flex items-center gap-1">
+                Markdown formatting supported. Embed images with{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-3xs text-foreground">
+                  ![alt](https://...)
+                </code>
+              </p>
             </div>
 
             {/* Hint & Score */}
@@ -664,7 +717,7 @@ function QuestionsStudioContent() {
             <Button
               onClick={handleCreateQuestion}
               disabled={createMutation.isPending}
-              className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl gap-2 font-semibold"
+              className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-xl gap-2 font-semibold"
             >
               {createMutation.isPending ? <Spinner className="size-4" /> : <HugeiconsIcon icon={AddCircleIcon} className="size-4" />}
               Save Working Draft
@@ -720,7 +773,7 @@ function QuestionsStudioContent() {
             <Button
               onClick={handleSubmitForReview}
               disabled={submitMutation.isPending || !selectedReviewerId}
-              className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl gap-2 font-semibold"
+              className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-xl gap-2 font-semibold"
             >
               {submitMutation.isPending ? <Spinner className="size-4" /> : <HugeiconsIcon icon={SentIcon} className="size-4" />}
               Submit for Review

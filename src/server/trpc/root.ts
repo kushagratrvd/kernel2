@@ -4,6 +4,7 @@ import { contestRouter } from "./routers/contest";
 import { questionBankRouter } from "./routers/question-bank";
 import { taxonomyRouter } from "./routers/taxonomy";
 import { adminRouter } from "./routers/admin";
+import { aiRouter } from "./routers/ai";
 
 /**
  * This is the primary router for your server.
@@ -15,6 +16,7 @@ export const appRouter = createTRPCRouter({
   questionBank: questionBankRouter,
   taxonomy: taxonomyRouter,
   admin: adminRouter,
+  ai: aiRouter,
 });
 
 // export type definition of API

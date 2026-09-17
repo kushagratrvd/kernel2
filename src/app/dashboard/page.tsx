@@ -26,6 +26,7 @@ import {
   HourglassIcon,
   CheckmarkCircle02Icon,
   AlertCircleIcon,
+  SparklesIcon,
 } from "@hugeicons/core-free-icons";
 
 import { ModeToggle } from "@/components/ui/mode-toggle";
@@ -211,13 +212,23 @@ export default function DashboardPage() {
 
           <div className="flex items-center gap-3">
             {isCreator && (
-              <Button
-                onClick={() => router.push("/dashboard/questions?action=new")}
-                className="gap-2 bg-purple-600 hover:bg-purple-700 text-white rounded-2xl shadow-sm"
-              >
-                <HugeiconsIcon icon={AddCircleIcon} className="size-4" />
-                New Question
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => router.push("/dashboard/questions/ai")}
+                  className="gap-2 rounded-2xl text-xs font-semibold shadow-sm"
+                >
+                  <HugeiconsIcon icon={SparklesIcon} className="size-4" />
+                  Generate with AI
+                </Button>
+                <Button
+                  onClick={() => router.push("/dashboard/questions?action=new")}
+                  className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-2xl shadow-sm"
+                >
+                  <HugeiconsIcon icon={AddCircleIcon} className="size-4" />
+                  New Question
+                </Button>
+              </>
             )}
             {isAdmin && (
               <Button
