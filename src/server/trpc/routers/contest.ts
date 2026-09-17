@@ -1,4 +1,4 @@
-import { createTRPCRouter, protectedProcedure, adminProcedure, creatorOrReviewerProcedure } from "../init";
+import { createTRPCRouter, protectedProcedure, adminProcedure, creatorProcedure, creatorOrReviewerProcedure } from "../init";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { eq, and, ne, or, asc, desc } from "drizzle-orm";
@@ -578,7 +578,7 @@ export const contestRouter = createTRPCRouter({
   }),
 
   // Create contest
-  create: adminProcedure
+  create: creatorProcedure
     .input(z.object({
       code: z.string().min(1),
       title: z.string().min(1),
@@ -604,8 +604,8 @@ export const contestRouter = createTRPCRouter({
       return newContest;
     }),
 
-  // Get contest details for admin editing
-  getForEdit: adminProcedure
+  // Get contest details for editing
+  getForEdit: creatorProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const found = await ctx.db.query.contest.findFirst({
@@ -666,7 +666,7 @@ export const contestRouter = createTRPCRouter({
     }),
 
   // Add an APPROVED question (by version snapshot) to a contest
-  addQuestion: adminProcedure
+  addQuestion: creatorProcedure
     .input(z.object({
       contestId: z.string(),
       questionId: z.string(),
@@ -740,7 +740,7 @@ export const contestRouter = createTRPCRouter({
     }),
 
   // Remove a question from a contest
-  removeQuestion: adminProcedure
+  removeQuestion: creatorProcedure
     .input(z.object({ contestQuestionId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       return await ctx.db.transaction(async (tx) => {
@@ -786,7 +786,7 @@ export const contestRouter = createTRPCRouter({
     }),
 
   // Alias for backward compatibility with contest edit page
-  deleteQuestion: adminProcedure
+  deleteQuestion: creatorProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       return await ctx.db.transaction(async (tx) => {
@@ -837,7 +837,7 @@ export const contestRouter = createTRPCRouter({
     }),
 
   // Update contest question (marks/order)
-  updateQuestion: adminProcedure
+  updateQuestion: creatorProcedure
     .input(z.object({
       id: z.string(),
       marks: z.number().optional(),
@@ -885,7 +885,7 @@ export const contestRouter = createTRPCRouter({
     }),
 
   // Update contest metadata
-  update: adminProcedure
+  update: creatorProcedure
     .input(z.object({
       id: z.string().min(1),
       code: z.string().min(1),

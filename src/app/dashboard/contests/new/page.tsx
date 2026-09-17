@@ -55,7 +55,7 @@ export default function NewContestPage() {
     }
 
     try {
-      await createContestMutation.mutateAsync({
+      const newContest = await createContestMutation.mutateAsync({
         title,
         code: code.trim().toUpperCase(),
         description: description || undefined,
@@ -66,7 +66,11 @@ export default function NewContestPage() {
         isActive,
       });
 
-      router.push("/dashboard");
+      if (newContest?.id) {
+        router.push(`/dashboard/contests/${newContest.id}`);
+      } else {
+        router.push("/dashboard");
+      }
     } catch (err: any) {
       console.error(err);
       setErrorMsg(err.message || "Failed to create contest. Ensure the code is unique.");

@@ -2,37 +2,25 @@
 
 import { use, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useTRPC } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
-import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowLeft01Icon,
   AddCircleIcon,
-  Delete02Icon,
-  SaveIcon,
+  SearchIcon,
+  CheckmarkCircle02Icon,
   CodeIcon,
+  FileQuestionMarkIcon,
 } from "@hugeicons/core-free-icons";
-
-// Default starter codes from codebox.ts
-const DEFAULT_STARTER_CODES = {
-  "71": `import sys\n\ndef main():\n    # Read input from stdin\n    # Print result to stdout\n    line = sys.stdin.read().strip()\n    if line:\n        # Modify this to solve the challenge\n        print(f"Hello, {line}!")\n\nif __name__ == "__main__":\n    main()`,
-  "63": `const readline = require('readline');\n\nconst rl = readline.createInterface({\n    input: process.stdin,\n    output: process.stdout\n});\n\nrl.on('line', (line) => {\n    // Modify this to solve the challenge\n    console.log(\`Hello, \${line}!\`);\n    process.exit(0);\n});`,
-  "54": `#include <iostream>\n#include <string>\n\nusing namespace std;\n\nint main() {\n    // Modify this to solve the challenge\n    string name;\n    if (cin >> name) {\n        cout << "Hello, " << name << "!" << endl;\n    }\n    return 0;\n}`,
-  "50": `#include <stdio.h>\n\nint main() {\n    // Modify this to solve the challenge\n    char name[100];\n    if (scanf("%99s", name) == 1) {\n        printf("Hello, %s!\\n", name);\n    }\n    return 0;\n}`,
-  "62": `import java.util.Scanner;\n\npublic class Main {\n    public static void main(String[] args) {\n        // Modify this to solve the challenge\n        Scanner scanner = new Scanner(System.in);\n        if (scanner.hasNext()) {\n            String name = scanner.next();\n            System.out.println("Hello, " + name + "!");\n        }\n        scanner.close();\n    }\n}`
-};
-
 import { ModeToggle } from "@/components/ui/mode-toggle";
+import Link from "next/link";
 
-export default function NewQuestionPage({
+export default function AddContestQuestionsPage({
   params,
 }: {
   params: Promise<{ id: string }>;
@@ -42,112 +30,57 @@ export default function NewQuestionPage({
   const resolvedParams = use(params);
   const contestId = resolvedParams.id;
 
-  // General state
-  const [questionText, setQuestionText] = useState("");
-  const [questionScore, setQuestionScore] = useState(100);
-  const [questionType, setQuestionType] = useState<"mcq" | "text" | "code">("mcq");
-  const [errorMsg, setErrorMsg] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
+  const [selectedType, setSelectedType] = useState<string>("ALL");
+  const [customMarks, setCustomMarks] = useState<Record<string, number>>({});
+  const [addingId, setAddingId] = useState<string | null>(null);
 
-  // MCQ state
-  const [options, setOptions] = useState<string[]>(["Option A", "Option B"]);
-  const [correctOption, setCorrectOption] = useState("Option A");
+  // Contest query
+  const { data: contestData, refetch: refetchContest } = useQuery(
+    trpc.contest.getForEdit.queryOptions({ id: contestId })
+  );
 
-  // Text state
-  const [textCorrectAnswer, setTextCorrectAnswer] = useState("");
+  // Approved questions from Question Bank
+  const { data: questions, isLoading } = useQuery(
+    trpc.questionBank.listQuestionBank.queryOptions({
+      status: "APPROVED",
+      categoryId: selectedCategory === "ALL" ? undefined : selectedCategory,
+      questionType: selectedType === "ALL" ? undefined : (selectedType as any),
+      search: searchTerm.trim() || undefined,
+    })
+  );
 
-  // Code state
-  const [timeLimit, setTimeLimit] = useState(5);
-  const [memoryLimit, setMemoryLimit] = useState(128000);
-  const [starterCodes, setStarterCodes] = useState<Record<string, string>>(DEFAULT_STARTER_CODES);
-  const [testCases, setTestCases] = useState<Array<{ input: string; expectedOutput: string; isSample: boolean }>>([
-    { input: "Chai", expectedOutput: "Hello, Chai!", isSample: true },
-  ]);
+  // Categories query
+  const { data: categories } = useQuery(
+    trpc.taxonomy.listCategories.queryOptions()
+  );
 
-  const addQuestionMutation = useMutation(trpc.contest.addQuestion.mutationOptions());
+  // Add question mutation
+  const addQuestionMutation = useMutation(
+    trpc.contest.addQuestion.mutationOptions({
+      onSuccess: () => {
+        refetchContest();
+      },
+    })
+  );
 
-  // MCQ options helpers
-  const handleAddOption = () => {
-    setOptions([...options, `Option ${String.fromCharCode(65 + options.length)}`]);
-  };
+  const existingQuestionIds =
+    contestData?.questions?.map((q) => q.questionId || q.id) || [];
 
-  const handleRemoveOption = (index: number) => {
-    if (options.length <= 2) return;
-    const newOptions = options.filter((_, i) => i !== index);
-    setOptions(newOptions);
-    if (!newOptions.includes(correctOption)) {
-      setCorrectOption(newOptions[0]);
-    }
-  };
-
-  const handleOptionChange = (index: number, val: string) => {
-    const newOptions = [...options];
-    const oldVal = newOptions[index];
-    newOptions[index] = val;
-    setOptions(newOptions);
-    if (correctOption === oldVal) {
-      setCorrectOption(val);
-    }
-  };
-
-  // Test cases helpers
-  const handleAddTestCase = () => {
-    setTestCases([...testCases, { input: "", expectedOutput: "", isSample: false }]);
-  };
-
-  const handleRemoveTestCase = (index: number) => {
-    setTestCases(testCases.filter((_, i) => i !== index));
-  };
-
-  const handleTestCaseChange = (index: number, field: "input" | "expectedOutput" | "isSample", val: any) => {
-    const newTestCases = [...testCases];
-    newTestCases[index] = { ...newTestCases[index], [field]: val };
-    setTestCases(newTestCases);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg("");
-
-    if (!questionText) {
-      setErrorMsg("Question text is required.");
-      return;
-    }
-
+  const handleAddQuestion = async (questionId: string, defaultScore: number) => {
+    const marks = customMarks[questionId] ?? defaultScore;
+    setAddingId(questionId);
     try {
-      const payload: any = {
+      await addQuestionMutation.mutateAsync({
         contestId,
-        questionText,
-        questionType,
-        questionScore: Number(questionScore),
-      };
-
-      if (questionType === "mcq") {
-        payload.options = options.map(o => o.trim());
-        payload.correctOption = correctOption.trim();
-      } else if (questionType === "text") {
-        payload.correctOption = textCorrectAnswer.trim();
-      } else if (questionType === "code") {
-        payload.timeLimit = Number(timeLimit);
-        payload.memoryLimit = Number(memoryLimit);
-        payload.starterCode = starterCodes;
-        payload.allowedLanguages = [50, 54, 62, 63, 71];
-        payload.testCases = testCases.map(tc => ({
-          input: tc.input,
-          expectedOutput: tc.expectedOutput,
-          isSample: tc.isSample,
-        }));
-
-        if (payload.testCases.length === 0) {
-          setErrorMsg("Please add at least one test case for coding questions.");
-          return;
-        }
-      }
-
-      await addQuestionMutation.mutateAsync(payload);
-      router.push(`/dashboard/contests/${contestId}`);
-    } catch (err: any) {
-      console.error(err);
-      setErrorMsg(err.message || "Failed to create question.");
+        questionId,
+        marks: Number(marks),
+      });
+    } catch (err) {
+      console.error("Failed to add question to contest:", err);
+    } finally {
+      setAddingId(null);
     }
   };
 
@@ -158,337 +91,292 @@ export default function NewQuestionPage({
       {/* Header */}
       <header className="sticky top-0 z-50 flex items-center justify-between border-b border-border/40 bg-background/85 px-6 py-4 backdrop-blur-md">
         <div className="flex items-center gap-3">
-          <Button 
-            onClick={() => router.push(`/dashboard/contests/${contestId}`)} 
-            variant="ghost" 
-            size="sm" 
+          <Button
+            onClick={() => router.push(`/dashboard/contests/${contestId}`)}
+            variant="ghost"
+            size="sm"
             className="gap-1 rounded-xl"
           >
             <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
             Back to Contest
           </Button>
           <span className="text-base font-semibold tracking-tight text-foreground">
-            Create Question
+            Add Questions from Question Bank
           </span>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          <Button
+            onClick={() => router.push(`/dashboard/contests/${contestId}`)}
+            className="rounded-xl text-xs font-semibold"
+            size="sm"
+          >
+            Done
+          </Button>
           <ModeToggle />
         </div>
       </header>
 
-      {/* Form Workspace */}
-      <main className="flex-1 p-6 lg:p-10 max-w-4xl mx-auto w-full">
-        <div className="rounded-3xl border border-border/40 bg-card p-6 lg:p-8 shadow-sm backdrop-blur-md space-y-6">
-          <div>
-            <h1 className="text-2xl font-black">Configure Question</h1>
-            <p className="text-sm text-muted-foreground">Select a problem type and specify correct answers or test cases.</p>
+      {/* Main workspace */}
+      <main className="flex-1 p-6 lg:p-10 max-w-5xl mx-auto w-full space-y-6">
+        {/* Contest overview info */}
+        {contestData && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-3xl border border-border/40 bg-card shadow-xs backdrop-blur-md">
+            <div>
+              <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                Target Contest
+              </span>
+              <h2 className="text-xl font-black text-foreground">{contestData.title}</h2>
+            </div>
+            <div className="flex items-center gap-4 text-xs">
+              <div className="rounded-2xl bg-muted/40 px-3.5 py-2 border border-border/40 text-center">
+                <p className="text-muted-foreground font-semibold">Questions</p>
+                <p className="text-sm font-bold text-foreground">
+                  {contestData.questions?.length || 0}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-muted/40 px-3.5 py-2 border border-border/40 text-center">
+                <p className="text-muted-foreground font-semibold">Total Score</p>
+                <p className="text-sm font-bold text-foreground">
+                  {contestData.totalScore || 0} pts
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Search & Filter Controls */}
+        <div className="p-5 rounded-3xl border border-border/40 bg-card shadow-xs space-y-4 backdrop-blur-md">
+          <div className="relative">
+            <HugeiconsIcon
+              icon={SearchIcon}
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
+            />
+            <Input
+              placeholder="Search approved questions by title, description..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 rounded-2xl bg-input/40"
+            />
           </div>
 
-          <Separator />
-
-          {errorMsg && (
-            <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4 text-sm text-destructive font-medium">
-              {errorMsg}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Question Type Selection */}
-            <div className="space-y-2">
-              <Label className="font-semibold text-sm">Question Type</Label>
-              <div className="grid grid-cols-3 gap-3">
-                {(["mcq", "text", "code"] as const).map((type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => setQuestionType(type)}
-                    className={`flex flex-col items-center justify-center p-4 rounded-2xl border text-sm font-semibold transition-all outline-none ${
-                      questionType === type
-                        ? "border-primary bg-primary/5 ring-1 ring-primary text-primary"
-                        : "border-border/60 bg-muted/20 hover:bg-muted/40 text-muted-foreground"
-                    }`}
-                  >
-                    <span className="uppercase text-xs tracking-wider">{type === "mcq" ? "MCQ" : type}</span>
-                  </button>
-                ))}
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Type Filters */}
+              <div className="flex items-center rounded-xl bg-muted/40 p-1 border border-border/40 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setSelectedType("ALL")}
+                  className={`px-3 py-1 rounded-lg font-medium transition-all ${
+                    selectedType === "ALL"
+                      ? "bg-background text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  All Types
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedType("mcq")}
+                  className={`px-3 py-1 rounded-lg font-medium transition-all ${
+                    selectedType === "mcq"
+                      ? "bg-background text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  MCQ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedType("code")}
+                  className={`px-3 py-1 rounded-lg font-medium transition-all ${
+                    selectedType === "code"
+                      ? "bg-background text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Coding
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedType("text")}
+                  className={`px-3 py-1 rounded-lg font-medium transition-all ${
+                    selectedType === "text"
+                      ? "bg-background text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Text
+                </button>
               </div>
-            </div>
 
-            {/* General Fields */}
-            <div className="grid gap-4 sm:grid-cols-4">
-              <div className="sm:col-span-3 space-y-2">
-                <Label htmlFor="questionText" className="font-semibold text-sm">Question prompt *</Label>
-                <Input
-                  id="questionText"
-                  placeholder="e.g. Write a function that returns the sum of two integers."
-                  value={questionText}
-                  onChange={(e) => setQuestionText(e.target.value)}
-                  required
-                  className="rounded-2xl bg-input/50"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="questionScore" className="font-semibold text-sm">Points *</Label>
-                <Input
-                  id="questionScore"
-                  type="number"
-                  min={1}
-                  value={questionScore}
-                  onChange={(e) => setQuestionScore(Number(e.target.value))}
-                  required
-                  className="rounded-2xl bg-input/50 font-bold"
-                />
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* MCQ SECTION */}
-            {questionType === "mcq" && (
-              <div className="space-y-4">
-                <h3 className="font-bold text-base">Configure MCQ Options</h3>
-                <div className="space-y-3">
-                  {options.map((option, idx) => (
-                    <div key={idx} className="flex items-center gap-3">
-                      <Input
-                        value={option}
-                        onChange={(e) => handleOptionChange(idx, e.target.value)}
-                        placeholder={`Option ${idx + 1}`}
-                        required
-                        className="rounded-2xl bg-input/50"
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={options.length <= 2}
-                        onClick={() => handleRemoveOption(idx)}
-                        className="rounded-xl text-destructive hover:bg-destructive/10 shrink-0"
-                      >
-                        <HugeiconsIcon icon={Delete02Icon} className="size-4" />
-                      </Button>
-                    </div>
+              {/* Category Filter */}
+              {categories && categories.length > 0 && (
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="h-8 rounded-xl border border-border/40 bg-muted/40 px-3 text-xs text-foreground focus:outline-none"
+                >
+                  <option value="ALL">All Categories</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
                   ))}
-                </div>
-                <div className="flex gap-4 items-center">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleAddOption}
-                    size="sm"
-                    className="rounded-xl gap-1.5"
-                  >
-                    <HugeiconsIcon icon={AddCircleIcon} className="size-4" />
-                    Add Option
-                  </Button>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="correctOption" className="font-semibold text-sm">Correct Option</Label>
-                  <select
-                    id="correctOption"
-                    value={correctOption}
-                    onChange={(e) => setCorrectOption(e.target.value)}
-                    className="flex h-10 w-full rounded-2xl border border-border/50 bg-input/50 px-3 py-2 text-sm outline-none"
-                  >
-                    {options.map((opt, i) => (
-                      <option key={i} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            )}
-
-            {/* TEXT SECTION */}
-            {questionType === "text" && (
-              <div className="space-y-4">
-                <h3 className="font-bold text-base">Configure Text Answer</h3>
-                <div className="space-y-2">
-                  <Label htmlFor="textAnswer" className="font-semibold text-sm">Correct Answer (Exact Match, Case Insensitive) *</Label>
-                  <Input
-                    id="textAnswer"
-                    placeholder="e.g. cin"
-                    value={textCorrectAnswer}
-                    onChange={(e) => setTextCorrectAnswer(e.target.value)}
-                    required={questionType === "text"}
-                    className="rounded-2xl bg-input/50 font-mono"
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* CODE SECTION */}
-            {questionType === "code" && (
-              <div className="space-y-6">
-                <div>
-                  <h3 className="font-bold text-base">Execution Constraints</h3>
-                  <p className="text-xs text-muted-foreground">Adjust sandbox constraints for execution runs.</p>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="timeLimit" className="font-semibold text-sm">Execution Timeout Limit (Seconds)</Label>
-                    <Input
-                      id="timeLimit"
-                      type="number"
-                      min={1}
-                      max={15}
-                      value={timeLimit}
-                      onChange={(e) => setTimeLimit(Number(e.target.value))}
-                      className="rounded-2xl bg-input/50"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="memoryLimit" className="font-semibold text-sm">Memory Limit (KB)</Label>
-                    <Input
-                      id="memoryLimit"
-                      type="number"
-                      min={1000}
-                      max={512000}
-                      value={memoryLimit}
-                      onChange={(e) => setMemoryLimit(Number(e.target.value))}
-                      className="rounded-2xl bg-input/50"
-                    />
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Test Cases Builder */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-bold text-base">Test Cases</h3>
-                      <p className="text-xs text-muted-foreground">Add input and expected output pairs. Samples are shown to students.</p>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={handleAddTestCase}
-                      className="rounded-xl gap-1.5"
-                    >
-                      <HugeiconsIcon icon={AddCircleIcon} className="size-4" />
-                      Add Test Case
-                    </Button>
-                  </div>
-
-                  <div className="space-y-4">
-                    {testCases.map((tc, idx) => (
-                      <div key={idx} className="p-4 rounded-2xl border border-border/40 bg-muted/10 space-y-3 relative group">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-bold text-muted-foreground">Test Case #{idx + 1}</span>
-                          <div className="flex items-center gap-4">
-                            <label className="flex items-center gap-1.5 text-xs font-medium cursor-pointer">
-                              <Switch
-                                size="sm"
-                                checked={tc.isSample}
-                                onCheckedChange={(val) => handleTestCaseChange(idx, "isSample", val)}
-                              />
-                              Sample Case
-                            </label>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleRemoveTestCase(idx)}
-                              className="rounded-xl text-destructive hover:bg-destructive/10 h-7 px-2"
-                            >
-                              <HugeiconsIcon icon={Delete02Icon} className="size-3.5" />
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <div className="space-y-1">
-                            <Label className="text-xs">Input stdin</Label>
-                            <Textarea
-                              value={tc.input}
-                              onChange={(e) => handleTestCaseChange(idx, "input", e.target.value)}
-                              rows={2}
-                              className="font-mono text-xs rounded-xl bg-input/50"
-                              placeholder="Input values..."
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Expected stdout</Label>
-                            <Textarea
-                              value={tc.expectedOutput}
-                              onChange={(e) => handleTestCaseChange(idx, "expectedOutput", e.target.value)}
-                              rows={2}
-                              className="font-mono text-xs rounded-xl bg-input/50"
-                              placeholder="Expected stdout values..."
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Boilerplate Starter Codes */}
-                <div className="space-y-3">
-                  <div>
-                    <h3 className="font-bold text-base">Custom Boilerplate Starter Code</h3>
-                    <p className="text-xs text-muted-foreground">Customize template code rendered when a student loads this coding task.</p>
-                  </div>
-
-                  <Tabs defaultValue="71" className="w-full">
-                    <TabsList className="bg-muted/40 rounded-xl p-1 gap-1">
-                      <TabsTrigger value="71" className="rounded-lg text-xs">Python</TabsTrigger>
-                      <TabsTrigger value="63" className="rounded-lg text-xs">NodeJS</TabsTrigger>
-                      <TabsTrigger value="54" className="rounded-lg text-xs">C++</TabsTrigger>
-                      <TabsTrigger value="50" className="rounded-lg text-xs">C</TabsTrigger>
-                      <TabsTrigger value="62" className="rounded-lg text-xs">Java</TabsTrigger>
-                    </TabsList>
-                    
-                    {Object.keys(DEFAULT_STARTER_CODES).map((langId) => (
-                      <TabsContent key={langId} value={langId} className="pt-2">
-                        <Textarea
-                          value={starterCodes[langId] || ""}
-                          onChange={(e) => setStarterCodes({ ...starterCodes, [langId]: e.target.value })}
-                          rows={10}
-                          className="font-mono text-xs rounded-2xl bg-input/50 resize-none"
-                        />
-                      </TabsContent>
-                    ))}
-                  </Tabs>
-                </div>
-              </div>
-            )}
-
-            <Separator />
-
-            {/* Form actions */}
-            <div className="flex justify-end gap-3">
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={() => router.push(`/dashboard/contests/${contestId}`)}
-                className="rounded-2xl px-6"
-              >
-                Cancel
-              </Button>
-              <Button 
-                type="submit" 
-                disabled={addQuestionMutation.isPending}
-                className="rounded-2xl bg-primary text-primary-foreground px-6 gap-2"
-              >
-                {addQuestionMutation.isPending ? <Spinner className="size-4" /> : (
-                  <>
-                    <HugeiconsIcon icon={SaveIcon} className="size-4" />
-                    Save Question
-                  </>
-                )}
-              </Button>
+                </select>
+              )}
             </div>
-          </form>
+
+            <Link
+              href="/dashboard/questions?action=new"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
+            >
+              <HugeiconsIcon icon={AddCircleIcon} className="size-4" />
+              Create Question in Bank
+            </Link>
+          </div>
+        </div>
+
+        {/* Questions list */}
+        <div className="space-y-3">
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center space-y-2">
+              <Spinner className="size-7 text-primary" />
+              <p className="text-xs text-muted-foreground">Loading approved questions...</p>
+            </div>
+          ) : !questions || questions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center border border-dashed border-border/60 rounded-3xl p-8 space-y-3 bg-card/50">
+              <HugeiconsIcon icon={FileQuestionMarkIcon} className="size-12 text-muted-foreground/60" />
+              <div className="space-y-1">
+                <h4 className="text-base font-bold">No approved questions found</h4>
+                <p className="text-xs text-muted-foreground max-w-sm">
+                  {searchTerm || selectedCategory !== "ALL" || selectedType !== "ALL"
+                    ? "Try adjusting your search or filters."
+                    : "Questions must be created and APPROVED by a reviewer in the Question Bank before they can be added to contests."}
+                </p>
+              </div>
+              <Link
+                href="/dashboard/questions?action=new"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold bg-primary text-primary-foreground px-4 py-2 rounded-xl"
+              >
+                <HugeiconsIcon icon={AddCircleIcon} className="size-4" />
+                Create New Question in Question Bank
+              </Link>
+            </div>
+          ) : (
+            questions.map((q) => {
+              const inContest = existingQuestionIds.includes(q.id);
+              const defaultScore = q.currentVersion?.questionScore || 100;
+              const currentScore = customMarks[q.id] ?? defaultScore;
+              const isAdding = addingId === q.id;
+
+              return (
+                <div
+                  key={q.id}
+                  className={`flex flex-col sm:flex-row sm:items-center justify-between p-5 rounded-3xl border transition-all gap-4 ${
+                    inContest
+                      ? "border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-950/10"
+                      : "border-border/40 bg-card hover:border-border/80 shadow-xs"
+                  }`}
+                >
+                  <div className="space-y-1.5 flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-2xs font-semibold ${
+                          q.questionType === "code"
+                            ? "bg-blue-500/10 text-blue-500"
+                            : q.questionType === "mcq"
+                            ? "bg-purple-500/10 text-purple-500"
+                            : "bg-orange-500/10 text-orange-500"
+                        }`}
+                      >
+                        {q.questionType === "code" ? (
+                          <HugeiconsIcon icon={CodeIcon} className="size-3" />
+                        ) : null}
+                        {q.questionType.toUpperCase()}
+                      </span>
+
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-2xs font-semibold ${
+                          q.difficulty === "easy"
+                            ? "bg-emerald-500/10 text-emerald-500"
+                            : q.difficulty === "medium"
+                            ? "bg-amber-500/10 text-amber-500"
+                            : "bg-rose-500/10 text-rose-500"
+                        }`}
+                      >
+                        {q.difficulty}
+                      </span>
+
+                      {q.category && (
+                        <span className="text-2xs font-medium text-muted-foreground bg-muted/50 px-2.5 py-0.5 rounded-md">
+                          {q.category.name}
+                          {q.topic ? ` • ${q.topic.name}` : ""}
+                        </span>
+                      )}
+
+                      <span className="text-2xs text-muted-foreground">
+                        v{q.currentVersion?.version || 1}
+                      </span>
+                    </div>
+
+                    <h3 className="text-base font-bold text-foreground">
+                      {q.currentVersion?.title || "Untitled Question"}
+                    </h3>
+
+                    {q.currentVersion?.description && (
+                      <p className="text-xs text-muted-foreground line-clamp-2">
+                        {q.currentVersion.description}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Marks & Add Button */}
+                  <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+                    <div className="flex items-center gap-1.5">
+                      <label htmlFor={`input-marks-${q.id}`} className="text-xs text-muted-foreground">Marks:</label>
+                      <Input
+                        id={`input-marks-${q.id}`}
+                        type="number"
+                        min={1}
+                        disabled={inContest}
+                        value={currentScore}
+                        onChange={(e) =>
+                          setCustomMarks((prev) => ({
+                            ...prev,
+                            [q.id]: Number(e.target.value),
+                          }))
+                        }
+                        className="w-20 h-9 text-xs font-bold text-center rounded-xl bg-input/40"
+                      />
+                    </div>
+
+                    {inContest ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-4 py-2 rounded-2xl">
+                        <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-4" />
+                        In Contest
+                      </span>
+                    ) : (
+                      <Button
+                        size="sm"
+                        disabled={isAdding}
+                        onClick={() => handleAddQuestion(q.id, defaultScore)}
+                        className="rounded-2xl h-9 px-4 text-xs gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90"
+                      >
+                        {isAdding ? (
+                          <Spinner className="size-4" />
+                        ) : (
+                          <>
+                            <HugeiconsIcon icon={AddCircleIcon} className="size-4" />
+                            Add to Contest
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </main>
     </div>

@@ -219,7 +219,7 @@ export default function DashboardPage() {
                 New Question
               </Button>
             )}
-            {isAdmin && (
+            {isCreator && (
               <Button
                 onClick={() => router.push("/dashboard/contests/new")}
                 className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-2xl shadow-sm"
@@ -527,7 +527,7 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {isAdmin && (
+            {isCreator && (
               <Button
                 onClick={() => router.push("/dashboard/contests/new")}
                 size="sm"
@@ -583,12 +583,12 @@ export default function DashboardPage() {
                       </td>
                       <td className="p-4 text-right">
                         <Button 
-                          onClick={() => router.push(isAdmin ? `/dashboard/contests/${c.id}` : `/contest/${c.code}`)}
+                          onClick={() => router.push(isCreator ? `/dashboard/contests/${c.id}` : `/contest/${c.code}`)}
                           variant="ghost" 
                           size="sm"
                           className="gap-1 group-hover:text-primary transition-colors rounded-xl"
                         >
-                          {isAdmin ? "Manage" : "View"}
+                          {isCreator ? "Manage" : "View"}
                           <HugeiconsIcon icon={ArrowRight01Icon} className="size-3 transition-transform group-hover:translate-x-0.5" />
                         </Button>
                       </td>
@@ -600,7 +600,7 @@ export default function DashboardPage() {
           ) : (
             <div className="flex flex-col items-center justify-center border border-dashed border-border/50 rounded-2xl p-12 text-center space-y-4">
               <p className="text-muted-foreground text-sm">No contests created yet.</p>
-              {isAdmin && (
+              {isCreator && (
                 <Button 
                   onClick={() => router.push("/dashboard/contests/new")}
                   size="sm" 

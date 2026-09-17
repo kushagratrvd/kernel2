@@ -769,7 +769,7 @@ export const questionBankRouter = createTRPCRouter({
       if (input.difficulty) conditions.push(eq(question.difficulty, input.difficulty));
       if (input.questionType) conditions.push(eq(question.questionType, input.questionType));
 
-      return ctx.db.query.question.findMany({
+      const questions = await ctx.db.query.question.findMany({
         where: and(...conditions),
         orderBy: (q, { desc }) => [desc(q.updatedAt)],
         with: {
@@ -778,6 +778,16 @@ export const questionBankRouter = createTRPCRouter({
           currentVersion: true,
           createdBy: { columns: { id: true, name: true } },
         },
+      });
+
+      if (!input.search || !input.search.trim()) return questions;
+      const q = input.search.trim().toLowerCase();
+      return questions.filter((item) => {
+        const title = item.currentVersion?.title?.toLowerCase() || "";
+        const desc = item.currentVersion?.description?.toLowerCase() || "";
+        const cat = item.category?.name?.toLowerCase() || "";
+        const top = item.topic?.name?.toLowerCase() || "";
+        return title.includes(q) || desc.includes(q) || cat.includes(q) || top.includes(q);
       });
     }),
 

@@ -20,6 +20,7 @@ import {
 } from "@hugeicons/core-free-icons";
 
 import { ModeToggle } from "@/components/ui/mode-toggle";
+import { QuestionPickerDialog } from "@/components/contests/question-picker-dialog";
 
 export default function ContestDetailPage({
   params,
@@ -30,6 +31,7 @@ export default function ContestDetailPage({
   const trpc = useTRPC();
   const resolvedParams = use(params);
   const contestId = resolvedParams.id;
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
 
   const { data: contestData, isLoading, error, refetch } = useQuery(
     trpc.contest.getForEdit.queryOptions({ id: contestId }),
@@ -124,7 +126,7 @@ export default function ContestDetailPage({
                 Edit Settings
               </Button>
               <Button 
-                onClick={() => router.push(`/dashboard/contests/${contestId}/questions/new`)}
+                onClick={() => setIsPickerOpen(true)}
                 className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 transition-all rounded-2xl"
               >
                 <HugeiconsIcon icon={AddCircleIcon} className="size-4" />
@@ -244,7 +246,7 @@ export default function ContestDetailPage({
             <div className="flex flex-col items-center justify-center border border-dashed border-border/50 rounded-2xl p-12 text-center space-y-4">
               <p className="text-muted-foreground text-sm">No questions added to this contest yet.</p>
               <Button 
-                onClick={() => router.push(`/dashboard/contests/${contestId}/questions/new`)}
+                onClick={() => setIsPickerOpen(true)}
                 size="sm" 
                 className="rounded-xl"
               >
@@ -254,6 +256,14 @@ export default function ContestDetailPage({
           )}
         </div>
       </main>
+
+      <QuestionPickerDialog
+        open={isPickerOpen}
+        onOpenChange={setIsPickerOpen}
+        contestId={contestId}
+        existingQuestionIds={contestData.questions.map((q) => q.questionId || q.id)}
+        onQuestionAdded={() => refetch()}
+      />
     </div>
   );
 }
