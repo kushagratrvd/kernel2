@@ -39,7 +39,7 @@ const AVAILABLE_ROLES = [
   {
     id: "creator" as const,
     label: "Creator",
-    description: "Create and draft questions, design contests, and submit for verification.",
+    description: "Create and draft questions, submit for reviewer verification, and build the Question Bank.",
     color: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30",
   },
   {
@@ -51,7 +51,7 @@ const AVAILABLE_ROLES = [
   {
     id: "admin" as const,
     label: "Admin",
-    description: "Full platform governance: user & role management, platform audits, all reviews.",
+    description: "Full platform governance: contest creation & management, user & role management, platform audits.",
     color: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30",
   },
   {

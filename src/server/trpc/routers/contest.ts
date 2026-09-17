@@ -1,4 +1,4 @@
-import { createTRPCRouter, protectedProcedure, adminProcedure, creatorProcedure, creatorOrReviewerProcedure } from "../init";
+import { createTRPCRouter, protectedProcedure, adminProcedure } from "../init";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { eq, and, ne, or, asc, desc } from "drizzle-orm";
@@ -570,15 +570,15 @@ export const contestRouter = createTRPCRouter({
 
   // ─── Admin Endpoints ──────────────────────────────────────────────────────
 
-  // List all contests for admin, creator, reviewer
-  listAll: creatorOrReviewerProcedure.query(async ({ ctx }) => {
+  // List all contests for admin
+  listAll: adminProcedure.query(async ({ ctx }) => {
     return ctx.db.query.contest.findMany({
       orderBy: (c, { desc }) => [desc(c.createdAt)],
     });
   }),
 
   // Create contest
-  create: creatorProcedure
+  create: adminProcedure
     .input(z.object({
       code: z.string().min(1),
       title: z.string().min(1),
@@ -605,7 +605,7 @@ export const contestRouter = createTRPCRouter({
     }),
 
   // Get contest details for editing
-  getForEdit: creatorProcedure
+  getForEdit: adminProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const found = await ctx.db.query.contest.findFirst({
@@ -666,7 +666,7 @@ export const contestRouter = createTRPCRouter({
     }),
 
   // Add an APPROVED question (by version snapshot) to a contest
-  addQuestion: creatorProcedure
+  addQuestion: adminProcedure
     .input(z.object({
       contestId: z.string(),
       questionId: z.string(),
@@ -740,7 +740,7 @@ export const contestRouter = createTRPCRouter({
     }),
 
   // Remove a question from a contest
-  removeQuestion: creatorProcedure
+  removeQuestion: adminProcedure
     .input(z.object({ contestQuestionId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       return await ctx.db.transaction(async (tx) => {
@@ -786,7 +786,7 @@ export const contestRouter = createTRPCRouter({
     }),
 
   // Alias for backward compatibility with contest edit page
-  deleteQuestion: creatorProcedure
+  deleteQuestion: adminProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       return await ctx.db.transaction(async (tx) => {
@@ -837,7 +837,7 @@ export const contestRouter = createTRPCRouter({
     }),
 
   // Update contest question (marks/order)
-  updateQuestion: creatorProcedure
+  updateQuestion: adminProcedure
     .input(z.object({
       id: z.string(),
       marks: z.number().optional(),
@@ -885,7 +885,7 @@ export const contestRouter = createTRPCRouter({
     }),
 
   // Update contest metadata
-  update: creatorProcedure
+  update: adminProcedure
     .input(z.object({
       id: z.string().min(1),
       code: z.string().min(1),
