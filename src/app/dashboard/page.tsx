@@ -219,6 +219,16 @@ export default function DashboardPage() {
                 New Question
               </Button>
             )}
+            {isAdmin && (
+              <Button
+                onClick={() => router.push("/dashboard/admin/users")}
+                variant="outline"
+                className="gap-2 rounded-2xl border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 shadow-sm"
+              >
+                <HugeiconsIcon icon={UserGroupIcon} className="size-4" />
+                Users & Roles
+              </Button>
+            )}
             {isCreator && (
               <Button
                 onClick={() => router.push("/dashboard/contests/new")}

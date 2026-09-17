@@ -4,8 +4,75 @@ import { TRPCError } from "@trpc/server";
 import { eq, and, desc, ilike, or } from "drizzle-orm";
 import { user } from "@/server/db/auth-schema";
 import { auditLog } from "@/server/db/audit-schema";
+import { auth } from "@/server/auth";
 
 export const adminRouter = createTRPCRouter({
+  // Create a new user with specific roles
+  createUser: adminProcedure
+    .input(
+      z.object({
+        name: z.string().min(1, "Name is required"),
+        email: z.string().email("Invalid email"),
+        password: z.string().min(8, "Password must be at least 8 characters"),
+        roles: z.array(z.enum(["admin", "creator", "reviewer", "student"])).min(1, "Select at least one role"),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const email = input.email.trim().toLowerCase();
+      const existingUser = await ctx.db.query.user.findFirst({
+        where: eq(user.email, email),
+      });
+
+      if (existingUser) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "A user with this email address already exists.",
+        });
+      }
+
+      try {
+        const created = await auth.api.createUser({
+          body: {
+            name: input.name.trim(),
+            email,
+            password: input.password,
+            role: input.roles[0]!,
+            data: {
+              roles: input.roles,
+              status: "ACTIVE",
+            },
+          },
+        });
+
+        // Sync roles in database
+        await ctx.db
+          .update(user)
+          .set({
+            roles: input.roles,
+            role: input.roles[0]!,
+            status: "ACTIVE",
+            updatedAt: new Date(),
+          })
+          .where(eq(user.id, created.user.id));
+
+        await ctx.db.insert(auditLog).values({
+          id: crypto.randomUUID(),
+          userId: ctx.user.id,
+          action: "USER_CREATED",
+          entityType: "user",
+          entityId: created.user.id,
+          metadata: { email, roles: input.roles },
+        });
+
+        return { success: true, user: created.user };
+      } catch (err: any) {
+        console.error("Failed to create user:", err);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: err.message || "Failed to create user.",
+        });
+      }
+    }),
   // List all users with optional filtering
   listUsers: adminProcedure
     .input(

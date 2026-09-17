@@ -46,6 +46,10 @@ function ReviewDeskContent() {
   const [actionComment, setActionComment] = useState("");
   const [replyMessage, setReplyMessage] = useState("");
 
+  const userRoles = ((session?.user as any)?.roles as string[]) || [];
+  const userRole = (session?.user as any)?.role as string;
+  const isAdmin = userRoles.includes("admin") || userRole === "admin";
+
   // Queries
   const { data: assignedList, isLoading: isAssignedLoading, refetch: refetchAssigned } = useQuery(
     trpc.questionBank.listAssigned.queryOptions({})
@@ -166,6 +170,11 @@ function ReviewDeskContent() {
           </Button>
           <Separator orientation="vertical" className="h-4" />
           <span className="text-base font-bold tracking-tight">Reviewer Desk</span>
+          {isAdmin && (
+            <Badge variant="outline" className="text-2xs bg-purple-500/10 text-purple-500 border-purple-500/30 font-bold px-2 py-0.5 ml-2">
+              Admin Oversight (All Reviewers)
+            </Badge>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
@@ -256,9 +265,31 @@ function ReviewDeskContent() {
                         {a.version?.title || "Question Snapshot"}
                       </h4>
 
-                      <div className="text-2xs text-muted-foreground mt-1 flex items-center justify-between">
-                        <span>By {(a as any).assignedBy?.name || (a as any).assignedBy?.email || "Creator"}</span>
-                        <span className="uppercase font-mono">{a.question?.questionType}</span>
+                      <div className="flex items-center justify-between mt-1 text-2xs text-muted-foreground">
+                        <span className="uppercase font-mono font-semibold">{a.question?.questionType}</span>
+                        {a.question?.category && (
+                          <span className="bg-muted px-2 py-0.5 rounded text-foreground/80 font-medium">
+                            {a.question.category.name}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Reviewer & Creator Information */}
+                      <div className="mt-2.5 pt-2 border-t border-border/30 flex flex-col gap-1 text-2xs">
+                        <div className="flex items-center justify-between text-muted-foreground">
+                          <span className="font-semibold text-foreground/80">Creator:</span>
+                          <span className="font-medium text-foreground truncate max-w-[150px]">
+                            {(a as any).assignedBy?.name || (a as any).assignedBy?.email || "Creator"}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-muted-foreground">
+                          <span className="font-semibold text-foreground/80">
+                            {a.status === "COMPLETED" ? "Reviewed By:" : "Assigned Reviewer:"}
+                          </span>
+                          <span className="font-medium text-foreground truncate max-w-[150px]">
+                            {(a as any).reviewer?.name || (a as any).reviewer?.email || "Reviewer"}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   );
@@ -337,6 +368,51 @@ function ReviewDeskContent() {
                       </Button>
                     </div>
                   )}
+                </div>
+
+                {/* Assignment & Reviewer Information Box */}
+                <div className="rounded-2xl border border-border/40 bg-muted/20 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                      Assignment & Reviewer Details
+                    </span>
+                    {isAdmin && (
+                      <Badge variant="outline" className="text-2xs bg-purple-500/10 text-purple-500 border-purple-500/30 font-bold">
+                        Admin Oversight
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className="p-3.5 rounded-xl bg-card border border-border/40 space-y-1 shadow-xs">
+                      <span className="font-bold text-muted-foreground uppercase text-2xs">
+                        {currentAssignment.status === "COMPLETED" ? "Reviewed By" : "Assigned Reviewer"}
+                      </span>
+                      <p className="font-bold text-sm text-foreground">
+                        {(currentAssignment as any).reviewer?.name || "Reviewer"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {(currentAssignment as any).reviewer?.email || "No email"}
+                      </p>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-card border border-border/40 space-y-1 shadow-xs">
+                      <span className="font-bold text-muted-foreground uppercase text-2xs">Submitted By (Creator)</span>
+                      <p className="font-bold text-sm text-foreground">
+                        {(currentAssignment as any).assignedBy?.name || "Creator"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {(currentAssignment as any).assignedBy?.email || "No email"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between text-2xs text-muted-foreground pt-1 px-1">
+                    <span>Assigned on: {new Date(currentAssignment.assignedAt).toLocaleString()}</span>
+                    {currentAssignment.completedAt && (
+                      <span>Completed on: {new Date(currentAssignment.completedAt).toLocaleString()}</span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Question Description */}
