@@ -1,10 +1,29 @@
 # Handover & Session Status
 
 > **Living document** for session continuity. Read this at the start of every AI session.
+> Summarizes current system state, active work, unstable areas, and session history.
 
 ---
 
-## 1. What is Fully Done & Stable
+## 1. 5-Line Session Summaries (Newest at Top)
+
+### Session: 2026-09-18 (Admin Direct Question Approval)
+- What was done: Implemented Admin Direct Question Approval with cancel-and-create assignment pattern, shared draft validation (`validateQuestionDraft`), shared client `getUserRoles`, and confirmation dialogs in table and modal.
+- What was committed: `b42d601` (`feat: admin direct question approval with immutable snapshot minting and assignment cancel-and-create pattern`), `1436538` (`docs update`).
+- Build state: Verified `pnpm exec tsc --noEmit` with 0 type errors.
+- What's left: Browser smoke test of direct approval flow and contest picker integration.
+- What to watch out for: Direct approval cancels active assignments without deleting them, preserving the audit trail while moving questions straight to `APPROVED`.
+
+### Session: 2026-09-18 (Contest Access Control & Shared Components)
+- What was done: Restricted all contest management to Admins, converted Reviewer Desk and Question Studio to tables, extracted shared components (`QuestionStatusBadge`, `ReviewDiscussionThread`), and expanded execution logs.
+- What was committed: `1f84975` (tables & review history), `251ef29` (shared components), `50582fc` (contest admin restrictions).
+- Build state: Verified `pnpm exec tsc --noEmit` with 0 type errors.
+- What's left: Admin direct draft approval workflow.
+- What to watch out for: Creators or Reviewers attempting direct URL access to `/dashboard/contests/*` will be redirected to `/dashboard`.
+
+---
+
+## 2. What is Fully Done & Stable until last session (replaced every important session)
 
 - **Contest Access Control**: Contests are restricted exclusively to Admins.
   - Backend: `listAll`, `create`, `getForEdit`, `addQuestion`, `removeQuestion`, `deleteQuestion`, `updateQuestion`, and `update` all require `adminProcedure`.
@@ -24,15 +43,10 @@
 
 ---
 
-## 2. What is Currently in Progress
+## 3. What is Currently in Progress (current session progress, replaced not incrementally updated)
 
-- All planned components for Admin Direct Approval are complete and typechecked. Ready for commit.
-
----
-
-## 3. What is Broken or Unstable
-
-- **None**: `pnpm exec tsc --noEmit` compiles cleanly with **0 errors**.
+- Admin Direct Question Approval is fully completed, typechecked (0 errors), and committed (`b42d601`, `1436538`).
+- Ready for browser testing or next prioritized feature.
 
 ---
 
@@ -40,13 +54,3 @@
 
 - **Direct DB schema edits without Drizzle migration**: Avoid writing custom raw SQL queries directly to Neon Postgres; all schema alterations must go through Drizzle ORM definitions in `src/server/db/`.
 - **Student Exam Runner (`src/app/contest/[code]/`)**: Avoid changing student attempt timer or answer submission mechanisms unless tasked, as these affect live exam validity.
-
----
-
-## 5. 5-Line Session Summary
-
-- What was done: Implemented Admin Direct Question Approval with cancel-and-create assignment pattern, shared draft validation, shared client `getUserRoles`, and confirmation dialogs.
-- What was committed: `b42d601` (`feat: admin direct question approval with immutable snapshot minting and assignment cancel-and-create pattern`).
-- Build state: Verified `pnpm exec tsc --noEmit` with 0 type errors.
-- What's left: Browser smoke test of direct approval flow and contest picker integration.
-- What to watch out for: Direct approval cancels active assignments without deleting them, preserving the audit trail while moving questions straight to `APPROVED`.
