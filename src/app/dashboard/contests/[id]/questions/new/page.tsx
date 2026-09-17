@@ -68,14 +68,16 @@ export default function AddContestQuestionsPage({
   const existingQuestionIds =
     contestData?.questions?.map((q) => q.questionId || q.id) || [];
 
-  const handleAddQuestion = async (questionId: string, defaultScore: number) => {
-    const marks = customMarks[questionId] ?? defaultScore;
+  const [defaultTeacherMarks, setDefaultTeacherMarks] = useState<number>(10);
+
+  const handleAddQuestion = async (questionId: string) => {
+    const marks = customMarks[questionId] !== undefined ? customMarks[questionId] : defaultTeacherMarks;
     setAddingId(questionId);
     try {
       await addQuestionMutation.mutateAsync({
         contestId,
         questionId,
-        marks: Number(marks),
+        marks: Number(marks) > 0 ? Number(marks) : 10,
       });
     } catch (err) {
       console.error("Failed to add question to contest:", err);
@@ -224,6 +226,18 @@ export default function AddContestQuestionsPage({
                   ))}
                 </select>
               )}
+
+              {/* Quick default marks for teacher */}
+              <div className="flex items-center gap-1.5 bg-muted/40 px-3 py-1 rounded-xl border border-border/40">
+                <span className="text-2xs text-muted-foreground font-medium">Default Marks:</span>
+                <Input
+                  type="number"
+                  min={1}
+                  value={defaultTeacherMarks}
+                  onChange={(e) => setDefaultTeacherMarks(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-16 h-6 text-xs text-center font-bold rounded-lg bg-background p-0"
+                />
+              </div>
             </div>
 
             <Link
@@ -265,8 +279,7 @@ export default function AddContestQuestionsPage({
           ) : (
             questions.map((q) => {
               const inContest = existingQuestionIds.includes(q.id);
-              const defaultScore = q.currentVersion?.questionScore || 100;
-              const currentScore = customMarks[q.id] ?? defaultScore;
+              const questionMarks = customMarks[q.id] !== undefined ? customMarks[q.id] : defaultTeacherMarks;
               const isAdding = addingId === q.id;
 
               return (
@@ -330,20 +343,20 @@ export default function AddContestQuestionsPage({
                     )}
                   </div>
 
-                  {/* Marks & Add Button */}
+                  {/* Teacher Assigned Marks & Add Button */}
                   <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
                     <div className="flex items-center gap-1.5">
-                      <label htmlFor={`input-marks-${q.id}`} className="text-xs text-muted-foreground">Marks:</label>
+                      <label htmlFor={`input-marks-${q.id}`} className="text-xs font-semibold text-muted-foreground">Marks:</label>
                       <Input
                         id={`input-marks-${q.id}`}
                         type="number"
                         min={1}
                         disabled={inContest}
-                        value={currentScore}
+                        value={questionMarks}
                         onChange={(e) =>
                           setCustomMarks((prev) => ({
                             ...prev,
-                            [q.id]: Number(e.target.value),
+                            [q.id]: Math.max(1, Number(e.target.value) || 1),
                           }))
                         }
                         className="w-20 h-9 text-xs font-bold text-center rounded-xl bg-input/40"
@@ -359,7 +372,7 @@ export default function AddContestQuestionsPage({
                       <Button
                         size="sm"
                         disabled={isAdding}
-                        onClick={() => handleAddQuestion(q.id, defaultScore)}
+                        onClick={() => handleAddQuestion(q.id)}
                         className="rounded-2xl h-9 px-4 text-xs gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90"
                       >
                         {isAdding ? (
