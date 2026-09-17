@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, useMemo, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/lib/auth-client";
@@ -41,6 +41,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { ModeToggle } from "@/components/ui/mode-toggle";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
+import { QuestionDetailModal } from "./question-detail-modal";
 
 type QuestionType = "mcq" | "text" | "code";
 type Difficulty = "easy" | "medium" | "hard";
@@ -63,9 +64,12 @@ function QuestionsStudioContent() {
   const { data: session } = authClient.useSession();
 
   const [activeStatusTab, setActiveStatusTab] = useState<string>("ALL");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
   const [isCreateOpen, setIsCreateOpen] = useState(searchParams?.get("action") === "new");
   const [isSubmitOpen, setIsSubmitOpen] = useState(false);
   const [selectedQuestionForSubmit, setSelectedQuestionForSubmit] = useState<string | null>(null);
+  const [selectedDetailQuestionId, setSelectedDetailQuestionId] = useState<string | null>(null);
   const [selectedReviewerId, setSelectedReviewerId] = useState<string>("");
   const [submitComment, setSubmitComment] = useState<string>("");
 
@@ -220,6 +224,117 @@ function QuestionsStudioContent() {
 
   const filteredTopics = categories?.find((c) => c.id === categoryId)?.topics || [];
 
+  const filteredQuestions = useMemo(() => {
+    if (!myQuestions) return [];
+    let items = myQuestions;
+
+    if (typeFilter !== "all") {
+      items = items.filter((q) => q.questionType === typeFilter);
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      items = items.filter((item) => {
+        const draft = item.currentDraft as any;
+        const curV = item.currentVersion;
+        const title = (draft?.title || curV?.title || "").toLowerCase();
+        const desc = (draft?.description || curV?.description || "").toLowerCase();
+        const cat = (item.category?.name || "").toLowerCase();
+        const top = (item.topic?.name || "").toLowerCase();
+        return title.includes(q) || desc.includes(q) || cat.includes(q) || top.includes(q);
+      });
+    }
+
+    return items;
+  }, [myQuestions, searchQuery, typeFilter]);
+
+  const renderQuestionStatusBadge = (status: string) => {
+    switch (status) {
+      case "APPROVED":
+        return (
+          <Badge
+            variant="outline"
+            className="bg-green-500/10 text-green-500 border-green-500/30 text-2xs font-bold uppercase gap-1"
+          >
+            <span className="size-1.5 rounded-full bg-green-500" />
+            Approved
+          </Badge>
+        );
+      case "CHANGES_REQUESTED":
+        return (
+          <Badge
+            variant="outline"
+            className="bg-amber-500/10 text-amber-500 border-amber-500/30 text-2xs font-bold uppercase gap-1"
+          >
+            <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
+            Changes Requested
+          </Badge>
+        );
+      case "UNDER_REVIEW":
+        return (
+          <Badge
+            variant="outline"
+            className="bg-blue-500/10 text-blue-500 border-blue-500/30 text-2xs font-bold uppercase gap-1"
+          >
+            <span className="size-1.5 rounded-full bg-blue-500 animate-pulse" />
+            Under Review
+          </Badge>
+        );
+      case "SUBMITTED_FOR_REVIEW":
+        return (
+          <Badge
+            variant="outline"
+            className="bg-purple-500/10 text-purple-500 border-purple-500/30 text-2xs font-bold uppercase gap-1"
+          >
+            <span className="size-1.5 rounded-full bg-purple-500" />
+            Submitted
+          </Badge>
+        );
+      case "REJECTED":
+        return (
+          <Badge
+            variant="outline"
+            className="bg-red-500/10 text-red-500 border-red-500/30 text-2xs font-bold uppercase gap-1"
+          >
+            <span className="size-1.5 rounded-full bg-red-500" />
+            Rejected
+          </Badge>
+        );
+      default:
+        return (
+          <Badge
+            variant="outline"
+            className="bg-muted text-muted-foreground text-2xs font-bold uppercase"
+          >
+            Draft
+          </Badge>
+        );
+    }
+  };
+
+  const renderDifficultyBadge = (diff?: string) => {
+    switch (diff) {
+      case "easy":
+        return (
+          <span className="text-2xs font-bold capitalize px-2 py-0.5 rounded-full bg-green-500/10 text-green-500">
+            Easy
+          </span>
+        );
+      case "hard":
+        return (
+          <span className="text-2xs font-bold capitalize px-2 py-0.5 rounded-full bg-red-500/10 text-red-500">
+            Hard
+          </span>
+        );
+      default:
+        return (
+          <span className="text-2xs font-bold capitalize px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500">
+            Medium
+          </span>
+        );
+    }
+  };
+
   return (
     <div className="relative min-h-screen bg-background flex flex-col">
       {/* Top Navbar */}
@@ -262,7 +377,7 @@ function QuestionsStudioContent() {
 
       {/* Main Workspace */}
       <main className="flex-1 max-w-7xl mx-auto w-full p-6 lg:p-10 space-y-6">
-        {/* Header & Tabs */}
+        {/* Header & Search */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-black tracking-tight">Question Bank Repository</h1>
@@ -271,95 +386,163 @@ function QuestionsStudioContent() {
             </p>
           </div>
 
-          <div className="flex items-center gap-1 bg-muted/40 p-1 rounded-xl border border-border/40 text-xs font-semibold overflow-x-auto">
-            {["ALL", "DRAFT", "SUBMITTED_FOR_REVIEW", "UNDER_REVIEW", "CHANGES_REQUESTED", "APPROVED"].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveStatusTab(tab)}
-                className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${
-                  activeStatusTab === tab
-                    ? "bg-background text-foreground shadow-sm font-bold"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {tab.replace(/_/g, " ")}
-              </button>
-            ))}
+          {/* Search & Type filter */}
+          <div className="flex items-center gap-2.5">
+            <Input
+              placeholder="Search by title, description, category..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-9 w-64 rounded-xl text-xs bg-muted/30"
+            />
+            <div className="flex items-center bg-muted/30 rounded-xl border border-border/40 p-0.5 text-xs">
+              {(["all", "mcq", "code", "text"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTypeFilter(t)}
+                  className={`px-2.5 py-1 rounded-lg text-2xs font-bold uppercase transition-all ${
+                    typeFilter === t
+                      ? "bg-background text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* Question List */}
+        {/* Status Tabs */}
+        <div className="flex items-center gap-1 bg-muted/40 p-1 rounded-xl border border-border/40 text-xs font-semibold overflow-x-auto w-fit">
+          {["ALL", "DRAFT", "SUBMITTED_FOR_REVIEW", "UNDER_REVIEW", "CHANGES_REQUESTED", "APPROVED"].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveStatusTab(tab)}
+              className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${
+                activeStatusTab === tab
+                  ? "bg-background text-foreground shadow-sm font-bold"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {tab.replace(/_/g, " ")}
+            </button>
+          ))}
+        </div>
+
+        {/* Question List Table */}
         {isLoading ? (
           <div className="flex min-h-[300px] items-center justify-center">
             <Spinner className="size-8" />
           </div>
-        ) : myQuestions && myQuestions.length > 0 ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {myQuestions.map((q) => {
-              const draft = q.currentDraft as any;
-              return (
-                <div
-                  key={q.id}
-                  className="flex flex-col justify-between rounded-3xl border border-border/40 bg-card p-6 shadow-sm backdrop-blur-md space-y-4 hover:border-purple-500/40 transition-all group"
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="uppercase text-2xs font-mono font-bold px-2 py-0.5 rounded bg-muted">
-                        {q.questionType}
-                      </span>
-                      <Badge
-                        variant="outline"
-                        className={`text-2xs font-bold uppercase ${
-                          q.status === "APPROVED"
-                            ? "bg-green-500/10 text-green-500 border-green-500/30"
-                            : q.status === "DRAFT"
-                            ? "bg-muted text-muted-foreground"
-                            : q.status === "CHANGES_REQUESTED"
-                            ? "bg-amber-500/10 text-amber-500 border-amber-500/30"
-                            : "bg-blue-500/10 text-blue-500 border-blue-500/30"
-                        }`}
-                      >
-                        {q.status.replace(/_/g, " ")}
-                      </Badge>
-                    </div>
+        ) : filteredQuestions && filteredQuestions.length > 0 ? (
+          <div className="overflow-hidden rounded-2xl border border-border/30 bg-card shadow-sm">
+            <table className="w-full border-collapse text-left text-sm">
+              <thead>
+                <tr className="border-b border-border/30 bg-muted/30 font-semibold text-muted-foreground text-xs">
+                  <th className="p-4">Question Title</th>
+                  <th className="p-4">Type</th>
+                  <th className="p-4">Difficulty</th>
+                  <th className="p-4">Category / Topic</th>
+                  <th className="p-4">Score</th>
+                  <th className="p-4">Version</th>
+                  <th className="p-4">Status</th>
+                  <th className="p-4 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/20">
+                {filteredQuestions.map((q) => {
+                  const draft = q.currentDraft as any;
+                  const curV = q.currentVersion;
+                  const title = draft?.title || curV?.title || "Untitled Question";
+                  const hint = draft?.hint || curV?.hint;
+                  const score = draft?.questionScore || curV?.questionScore || 100;
+                  const versionNum = curV?.version;
 
-                    <h3 className="font-bold text-base text-foreground line-clamp-1">
-                      {draft?.title || "Untitled Question"}
-                    </h3>
+                  return (
+                    <tr
+                      key={q.id}
+                      onClick={() => setSelectedDetailQuestionId(q.id)}
+                      className="hover:bg-muted/15 transition-colors cursor-pointer group"
+                    >
+                      {/* Question Title */}
+                      <td className="p-4 font-semibold text-foreground">
+                        <div className="space-y-0.5">
+                          <span className="font-bold text-foreground group-hover:text-primary transition-colors line-clamp-1">
+                            {title}
+                          </span>
+                          {hint && (
+                            <span className="text-3xs text-muted-foreground line-clamp-1 italic">
+                              Hint: {hint}
+                            </span>
+                          )}
+                        </div>
+                      </td>
 
-                    <p className="text-xs text-muted-foreground line-clamp-2">
-                      {draft?.description || "No description provided."}
-                    </p>
+                      {/* Type */}
+                      <td className="p-4">
+                        <span className="uppercase text-2xs font-mono font-bold px-2 py-0.5 rounded bg-muted">
+                          {q.questionType}
+                        </span>
+                      </td>
 
-                    <div className="flex flex-wrap items-center gap-2 text-2xs text-muted-foreground font-semibold pt-1">
-                      <span>{q.category?.name || "General"}</span>
-                      {q.topic?.name && <span>• {q.topic.name}</span>}
-                      <span>• {draft?.questionScore || 100} pts</span>
-                      {q.createdBy && <span>• By {q.createdBy.name || q.createdBy.email}</span>}
-                    </div>
-                  </div>
+                      {/* Difficulty */}
+                      <td className="p-4">
+                        {renderDifficultyBadge(q.difficulty)}
+                      </td>
 
-                  <div className="pt-2 border-t border-border/30 flex items-center justify-between">
-                    <span className="text-2xs font-mono text-muted-foreground">
-                      {q.currentVersionId ? "Snapshot Minted" : "Working Draft"}
-                    </span>
+                      {/* Category / Topic */}
+                      <td className="p-4 text-xs text-muted-foreground">
+                        {q.category?.name || "General"}
+                        {q.topic?.name ? ` • ${q.topic.name}` : ""}
+                      </td>
 
-                    <div className="flex items-center gap-2">
-                      {(q.status === "DRAFT" || q.status === "CHANGES_REQUESTED") && (
-                        <Button
-                          size="xs"
-                          onClick={() => handleOpenSubmit(q.id)}
-                          className="rounded-xl gap-1 bg-primary text-primary-foreground hover:bg-primary/90 text-2xs font-semibold"
-                        >
-                          <HugeiconsIcon icon={SentIcon} className="size-3" />
-                          Submit to Reviewer
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+                      {/* Score */}
+                      <td className="p-4 font-mono text-xs text-foreground font-semibold">
+                        {score} pts
+                      </td>
+
+                      {/* Version */}
+                      <td className="p-4">
+                        <code className="text-2xs font-mono font-bold px-2 py-0.5 rounded bg-muted text-muted-foreground">
+                          {versionNum ? `v${versionNum}` : "Draft"}
+                        </code>
+                      </td>
+
+                      {/* Status */}
+                      <td className="p-4">
+                        {renderQuestionStatusBadge(q.status)}
+                      </td>
+
+                      {/* Action */}
+                      <td className="p-4 text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            onClick={() => setSelectedDetailQuestionId(q.id)}
+                            className="rounded-xl gap-1 text-2xs font-semibold hover:border-foreground/30"
+                          >
+                            <HugeiconsIcon icon={ViewIcon} className="size-3 text-purple-500" />
+                            View & Review
+                          </Button>
+
+                          {(q.status === "DRAFT" || q.status === "CHANGES_REQUESTED") && (
+                            <Button
+                              size="xs"
+                              onClick={() => handleOpenSubmit(q.id)}
+                              className="rounded-xl gap-1 bg-primary text-primary-foreground hover:bg-primary/90 text-2xs font-semibold"
+                            >
+                              <HugeiconsIcon icon={SentIcon} className="size-3" />
+                              Submit to Reviewer
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center border border-dashed border-border/50 rounded-3xl p-16 text-center space-y-4">
@@ -367,7 +550,9 @@ function QuestionsStudioContent() {
             <div>
               <h3 className="text-base font-bold">No questions found</h3>
               <p className="text-xs text-muted-foreground mt-1">
-                {activeStatusTab === "ALL"
+                {searchQuery || typeFilter !== "all"
+                  ? "Try adjusting your search terms or type filter to find questions."
+                  : activeStatusTab === "ALL"
                   ? "Start by creating your first question draft."
                   : `No questions currently in ${activeStatusTab.replace(/_/g, " ")} status.`}
               </p>
@@ -781,6 +966,17 @@ function QuestionsStudioContent() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Question Details & Review Conversation Modal */}
+      <QuestionDetailModal
+        questionId={selectedDetailQuestionId}
+        open={Boolean(selectedDetailQuestionId)}
+        onClose={() => {
+          setSelectedDetailQuestionId(null);
+          refetch();
+        }}
+        onSubmitForReview={(qId) => handleOpenSubmit(qId)}
+      />
     </div>
   );
 }

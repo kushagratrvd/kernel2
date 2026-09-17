@@ -516,13 +516,18 @@ export default function DashboardPage() {
                         <td className="p-4">
                           <Badge
                             variant="outline"
-                            className={`text-2xs font-bold uppercase ${
+                            className={`text-2xs font-bold uppercase gap-1 ${
                               a.status === "IN_REVIEW"
                                 ? "bg-blue-500/10 text-blue-500 border-blue-500/30"
                                 : "bg-yellow-500/10 text-yellow-500 border-yellow-500/30"
                             }`}
                           >
-                            {a.status}
+                            <span
+                              className={`size-1.5 rounded-full ${
+                                a.status === "IN_REVIEW" ? "bg-blue-500 animate-pulse" : "bg-yellow-500"
+                              }`}
+                            />
+                            {a.status === "IN_REVIEW" ? "In Review" : "Pending Pickup"}
                           </Badge>
                         </td>
                         <td className="p-4 text-right">

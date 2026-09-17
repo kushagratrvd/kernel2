@@ -436,6 +436,12 @@ export const questionBankRouter = createTRPCRouter({
           version: true,
           assignedBy: { columns: { id: true, name: true, email: true } },
           reviewer: { columns: { id: true, name: true, email: true } },
+          comments: {
+            orderBy: (c, { asc }) => [asc(c.createdAt)],
+            with: {
+              user: { columns: { id: true, name: true, email: true, image: true } },
+            },
+          },
         },
       });
     }),
@@ -450,7 +456,7 @@ export const questionBankRouter = createTRPCRouter({
       whereConditions.push(eq(questionAssignment.reviewerId, ctx.user.id));
     }
 
-    return ctx.db.query.questionAssignment.findMany({
+    const assignments = await ctx.db.query.questionAssignment.findMany({
       where: and(...whereConditions),
       orderBy: (a, { desc }) => [desc(a.completedAt ?? a.assignedAt)],
       with: {
@@ -464,8 +470,25 @@ export const questionBankRouter = createTRPCRouter({
         version: true,
         assignedBy: { columns: { id: true, name: true, email: true } },
         reviewer: { columns: { id: true, name: true, email: true } },
+        comments: {
+          orderBy: (c, { asc }) => [asc(c.createdAt)],
+          with: {
+            user: { columns: { id: true, name: true, email: true, image: true } },
+          },
+        },
       },
     });
+
+    // Deduplicate by questionId so each question only appears once in history, showing its latest review record
+    const seen = new Set<string>();
+    const deduplicated = [];
+    for (const a of assignments) {
+      if (!seen.has(a.questionId)) {
+        seen.add(a.questionId);
+        deduplicated.push(a);
+      }
+    }
+    return deduplicated;
   }),
 
   // Atomic pickup for review (transitions PENDING -> IN_REVIEW)
