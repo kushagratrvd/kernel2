@@ -50,6 +50,8 @@ import {
   Delete02Icon,
   Comment01Icon,
   ViewIcon,
+  Cancel01Icon,
+  PencilEdit02Icon,
 } from "@hugeicons/core-free-icons";
 import { ModeToggle } from "@/components/ui/mode-toggle";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
@@ -91,6 +93,14 @@ function QuestionsStudioContent() {
   const [selectedReviewerId, setSelectedReviewerId] = useState<string>("");
   const [submitComment, setSubmitComment] = useState<string>("");
 
+  // Admin lifecycle dialog states
+  const [rejectQuestionId, setRejectQuestionId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [restoreQuestionId, setRestoreQuestionId] = useState<string | null>(null);
+  const [restoreComment, setRestoreComment] = useState("");
+  const [archiveQuestionId, setArchiveQuestionId] = useState<string | null>(null);
+  const [unarchiveQuestionId, setUnarchiveQuestionId] = useState<string | null>(null);
+
   const directApproveMutation = useMutation(
     trpc.questionBank.directApproveDraft.mutationOptions({
       onSuccess: () => {
@@ -102,6 +112,63 @@ function QuestionsStudioContent() {
       },
       onError: (err) => {
         toast.error(err.message || "Failed to approve question directly.");
+      },
+    })
+  );
+
+  const adminRejectMutation = useMutation(
+    trpc.questionBank.adminReject.mutationOptions({
+      onSuccess: () => {
+        toast.success("Question has been rejected.");
+        queryClient.invalidateQueries(trpc.questionBank.listMyQuestions.pathFilter());
+        queryClient.invalidateQueries(trpc.questionBank.listQuestionBank.pathFilter());
+        setRejectQuestionId(null);
+        setRejectReason("");
+      },
+      onError: (err) => {
+        toast.error(err.message || "Failed to reject question.");
+      },
+    })
+  );
+
+  const adminRestoreMutation = useMutation(
+    trpc.questionBank.adminRestoreToDraft.mutationOptions({
+      onSuccess: () => {
+        toast.success("Question restored to DRAFT. Creator can now edit and resubmit.");
+        queryClient.invalidateQueries(trpc.questionBank.listMyQuestions.pathFilter());
+        setRestoreQuestionId(null);
+        setRestoreComment("");
+      },
+      onError: (err) => {
+        toast.error(err.message || "Failed to restore question.");
+      },
+    })
+  );
+
+  const archiveMutation = useMutation(
+    trpc.questionBank.archiveQuestion.mutationOptions({
+      onSuccess: () => {
+        toast.success("Question archived and hidden from future contests.");
+        queryClient.invalidateQueries(trpc.questionBank.listMyQuestions.pathFilter());
+        queryClient.invalidateQueries(trpc.questionBank.listQuestionBank.pathFilter());
+        setArchiveQuestionId(null);
+      },
+      onError: (err) => {
+        toast.error(err.message || "Failed to archive question.");
+      },
+    })
+  );
+
+  const unarchiveMutation = useMutation(
+    trpc.questionBank.unarchiveQuestion.mutationOptions({
+      onSuccess: () => {
+        toast.success("Question unarchived and returned to active Question Bank!");
+        queryClient.invalidateQueries(trpc.questionBank.listMyQuestions.pathFilter());
+        queryClient.invalidateQueries(trpc.questionBank.listQuestionBank.pathFilter());
+        setUnarchiveQuestionId(null);
+      },
+      onError: (err) => {
+        toast.error(err.message || "Failed to unarchive question.");
       },
     })
   );
@@ -383,7 +450,7 @@ function QuestionsStudioContent() {
 
         {/* Status Tabs */}
         <div className="flex items-center gap-1 bg-muted/40 p-1 rounded-xl border border-border/40 text-xs font-semibold overflow-x-auto w-fit">
-          {["ALL", "DRAFT", "SUBMITTED_FOR_REVIEW", "UNDER_REVIEW", "CHANGES_REQUESTED", "APPROVED"].map((tab) => (
+          {["ALL", "DRAFT", "SUBMITTED_FOR_REVIEW", "UNDER_REVIEW", "CHANGES_REQUESTED", "APPROVED", "REJECTED", "ARCHIVED"].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveStatusTab(tab)}
@@ -518,6 +585,67 @@ function QuestionsStudioContent() {
                             >
                               <HugeiconsIcon icon={SentIcon} className="size-3" />
                               Submit to Reviewer
+                            </Button>
+                          )}
+
+                          {/* Admin Reject */}
+                          {isAdmin &&
+                            ["DRAFT", "CHANGES_REQUESTED", "SUBMITTED_FOR_REVIEW", "UNDER_REVIEW", "APPROVED"].includes(
+                              q.status
+                            ) && (
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() => {
+                                  setRejectQuestionId(q.id);
+                                  setRejectReason("");
+                                }}
+                                className="rounded-xl gap-1 text-destructive hover:bg-destructive/10 border-destructive/30 text-2xs font-semibold"
+                              >
+                                <HugeiconsIcon icon={Cancel01Icon} className="size-3" />
+                                Reject
+                              </Button>
+                            )}
+
+                          {/* Admin Restore to Draft */}
+                          {isAdmin && q.status === "REJECTED" && (
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              onClick={() => {
+                                setRestoreQuestionId(q.id);
+                                setRestoreComment("");
+                              }}
+                              className="rounded-xl gap-1 text-amber-500 hover:bg-amber-500/10 border-amber-500/30 text-2xs font-semibold"
+                            >
+                              <HugeiconsIcon icon={PencilEdit02Icon} className="size-3" />
+                              Restore to Draft
+                            </Button>
+                          )}
+
+                          {/* Admin Archive */}
+                          {isAdmin && q.status === "APPROVED" && (
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              onClick={() => setArchiveQuestionId(q.id)}
+                              className="rounded-xl gap-1 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-500/10 border-zinc-500/30 text-2xs font-semibold"
+                            >
+                              <HugeiconsIcon icon={Delete02Icon} className="size-3" />
+                              Archive
+                            </Button>
+                          )}
+
+                          {/* Admin Unarchive */}
+                          {isAdmin && q.status === "ARCHIVED" && (
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              onClick={() => setUnarchiveQuestionId(q.id)}
+                              className="rounded-xl gap-1 text-emerald-500 hover:bg-emerald-500/10 border-emerald-500/30 text-2xs font-semibold"
+                            >
+                              <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-3" />
+                              Unarchive to Bank
                             </Button>
                           )}
                         </div>
@@ -1013,6 +1141,195 @@ function QuestionsStudioContent() {
               className="rounded-xl text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
             >
               {directApproveMutation.isPending ? "Approving..." : "Confirm & Approve"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Admin Reject Dialog */}
+      <AlertDialog
+        open={Boolean(rejectQuestionId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRejectQuestionId(null);
+            setRejectReason("");
+          }
+        }}
+      >
+        <AlertDialogContent className="rounded-3xl border border-destructive/30 max-w-lg">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-2 text-destructive">
+              <HugeiconsIcon icon={Cancel01Icon} className="size-5" />
+              <AlertDialogTitle>Reject Question</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-xs text-muted-foreground pt-1">
+              Rejecting this question halts any active peer-reviews and marks it as REJECTED. It will not appear in the Question Bank for future contests. As an admin, you can later restore it to DRAFT for the creator to rework.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2 py-2">
+            <Label className="text-xs font-semibold">
+              Reason for Rejection <span className="text-destructive">*</span>
+            </Label>
+            <Textarea
+              placeholder="Specify the reason why this question is being rejected (e.g., ambiguous wording, incorrect test cases)..."
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              className="rounded-xl text-xs bg-muted/20 resize-none h-24"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={adminRejectMutation.isPending}
+              className="rounded-xl text-xs"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!rejectQuestionId || !rejectReason.trim()) {
+                  toast.error("Please provide a rejection reason.");
+                  return;
+                }
+                adminRejectMutation.mutate({
+                  questionId: rejectQuestionId,
+                  reason: rejectReason.trim(),
+                });
+              }}
+              disabled={adminRejectMutation.isPending || !rejectReason.trim()}
+              className="rounded-xl text-xs bg-destructive hover:bg-destructive/90 text-destructive-foreground font-semibold"
+            >
+              {adminRejectMutation.isPending ? "Rejecting..." : "Confirm Rejection"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Admin Restore to Draft Dialog */}
+      <AlertDialog
+        open={Boolean(restoreQuestionId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRestoreQuestionId(null);
+            setRestoreComment("");
+          }
+        }}
+      >
+        <AlertDialogContent className="rounded-3xl border border-amber-500/30 max-w-lg">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-2 text-amber-500">
+              <HugeiconsIcon icon={PencilEdit02Icon} className="size-5" />
+              <AlertDialogTitle>Restore Question to Draft</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-xs text-muted-foreground pt-1">
+              This moves the question from REJECTED back to DRAFT. The author will be able to edit the content and test cases in Question Studio and re-submit for review.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2 py-2">
+            <Label className="text-xs font-semibold text-muted-foreground">
+              Revision Guidance Note (Optional)
+            </Label>
+            <Textarea
+              placeholder="e.g., Creator please clarify option B and fix sample test case output..."
+              value={restoreComment}
+              onChange={(e) => setRestoreComment(e.target.value)}
+              className="rounded-xl text-xs bg-muted/20 resize-none h-20"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={adminRestoreMutation.isPending}
+              className="rounded-xl text-xs"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!restoreQuestionId) return;
+                adminRestoreMutation.mutate({
+                  questionId: restoreQuestionId,
+                  comment: restoreComment.trim() || undefined,
+                });
+              }}
+              disabled={adminRestoreMutation.isPending}
+              className="rounded-xl text-xs bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+            >
+              {adminRestoreMutation.isPending ? "Restoring..." : "Restore to Draft"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Admin Archive Dialog */}
+      <AlertDialog
+        open={Boolean(archiveQuestionId)}
+        onOpenChange={(open) => {
+          if (!open) setArchiveQuestionId(null);
+        }}
+      >
+        <AlertDialogContent className="rounded-3xl border border-border/50 max-w-md">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <HugeiconsIcon icon={Delete02Icon} className="size-5" />
+              <AlertDialogTitle>Archive Question</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-xs text-muted-foreground pt-1">
+              Archiving hides this question from future contest creation in the Question Bank without deleting it. Existing contests using this question will remain unaffected. You can unarchive it at any time.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={archiveMutation.isPending}
+              className="rounded-xl text-xs"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!archiveQuestionId) return;
+                archiveMutation.mutate({ questionId: archiveQuestionId });
+              }}
+              disabled={archiveMutation.isPending}
+              className="rounded-xl text-xs bg-zinc-700 hover:bg-zinc-800 text-white font-semibold"
+            >
+              {archiveMutation.isPending ? "Archiving..." : "Archive Question"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Admin Unarchive Dialog */}
+      <AlertDialog
+        open={Boolean(unarchiveQuestionId)}
+        onOpenChange={(open) => {
+          if (!open) setUnarchiveQuestionId(null);
+        }}
+      >
+        <AlertDialogContent className="rounded-3xl border border-emerald-500/30 max-w-md">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-2 text-emerald-500">
+              <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-5" />
+              <AlertDialogTitle>Unarchive to Question Bank</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-xs text-muted-foreground pt-1">
+              This will restore the question directly to APPROVED status in the Question Bank. It will immediately be available for selection in contests.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={unarchiveMutation.isPending}
+              className="rounded-xl text-xs"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!unarchiveQuestionId) return;
+                unarchiveMutation.mutate({ questionId: unarchiveQuestionId });
+              }}
+              disabled={unarchiveMutation.isPending}
+              className="rounded-xl text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+            >
+              {unarchiveMutation.isPending ? "Restoring..." : "Confirm & Unarchive"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

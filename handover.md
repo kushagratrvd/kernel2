@@ -1,17 +1,21 @@
 # Handover & Session Status
 
 > **Living document** for session continuity. Read this at the start of every AI session.
-> Summarizes current system state, active work, unstable areas, and session history.
+> 
+> **Rule for Session Summaries**:
+> - Append the new 5-line summary for the current session at the top under **Section 1**. Never overwrite or delete old summaries.
+> - **Section 2** (What is Fully Done & Stable) and **Section 3** (What is Currently in Progress) must come immediately after Section 1.
+> - The previous session's summary moves down to **Section 4** (Previous Session Summaries) after Section 3, archiving older sessions downwards in reverse chronological order.
 
 ---
 
 ## 1. 5-Line Session Summary (Current Session)
 
-- What was done: Implemented Admin Direct Question Approval, shared draft validation, shared client `getUserRoles`, and added horizontal sliders (`overflow-x-auto`, `min-w-[1100px]`, `whitespace-nowrap`) to Question Studio and Reviewer Desk tables to prevent action button clipping.
-- What was committed: `b42d601`, `1436538`, `0b10ffb`, `52e9b4a`.
+- What was done: Implemented Admin Universal Question Reject (`adminReject`), Recovery to Draft (`adminRestoreToDraft`), and Archive/Unarchive (`archiveQuestion`, `unarchiveQuestion`) with cancel-and-create assignment audit pattern, mandatory rejection reasons, and confirmation dialogs in Question Studio table and Detail Modal.
+- What was committed: Pending commit.
 - Build state: Verified `pnpm exec tsc --noEmit` with 0 type errors.
-- What's left: Browser smoke test of direct approval flow and contest picker integration.
-- What to watch out for: Tables use an inner `overflow-x-auto` wrapper with `min-w-[1100px]` to maintain rounded borders while allowing full horizontal sliding.
+- What's left: Browser testing of reject, restore to draft, archive, and unarchive flows.
+- What to watch out for: `REJECTED` is recoverable to `DRAFT` for creator rework; `ARCHIVED` is restricted to `APPROVED` questions only and restores directly back to `APPROVED` without re-review. Existing contests remain completely unaffected because they reference immutable `questionVersion` snapshots.
 
 ---
 
@@ -22,11 +26,11 @@
   - Frontend: `ContestsAdminLayout` guards `/dashboard/contests/*`, redirecting non-admins to `/dashboard`.
   - Dashboard UI: Contests query, "Active Contests" card, "Create Contest" button, and "Contests Overview" table are hidden from Creators and Reviewers.
 - **Shared Components**:
-  - `<QuestionStatusBadge />` & `<ReviewAssignmentStatusBadge />` in `src/components/questions/question-status-badge.tsx`.
+  - `<QuestionStatusBadge />` & `<ReviewAssignmentStatusBadge />` in `src/components/questions/question-status-badge.tsx` (includes explicit `ARCHIVED` and `REJECTED` badge styles).
   - `<ReviewDiscussionThread />` in `src/components/questions/review-discussion-thread.tsx` (handles feedback banners, message stream, role badges, interactive replies).
 - **Dashboard Table Views**:
-  - Reviewer Desk (`/dashboard/reviews`): Table layout with real-time assignment status, accurate "Changes Requested" badges, and full thread inspection modal.
-  - Creator Question Studio (`/dashboard/questions`): Table layout with type/status filters, score, difficulty tags, and modal question review thread.
+  - Reviewer Desk (`/dashboard/reviews`): Table layout with real-time assignment status, accurate "Changes Requested" badges, horizontal scroll slider (`overflow-x-auto`, `min-w-[1100px]`), and full thread inspection modal.
+  - Creator Question Studio (`/dashboard/questions`): Table layout with type/status filters (including `REJECTED` and `ARCHIVED`), score, difficulty tags, horizontal scroll slider, and modal question review thread.
 - **Admin Direct Question Approval**:
   - Backend: `directApproveDraft` admin procedure validates draft via shared `validateQuestionDraft()`, mints immutable `questionVersion`, cancels active assignments, creates completed admin assignment, links `currentVersionId`, and transitions `question.status` to `APPROVED`.
   - Frontend: "Approve to Bank" button in Question Studio table and "Approve to Question Bank" in Question Detail Modal & Review Thread with confirmation dialog.
@@ -37,12 +41,30 @@
 
 ## 3. What is Currently in Progress (this always shows current session progress and is replaced not incrementally updated)
 
-- Admin Direct Question Approval is fully completed, typechecked (0 errors), and committed (`b42d601`, `1436538`).
-- Ready for browser testing or next prioritized feature.
+- Admin Universal Question Lifecycle Controls (`adminReject`, `adminRestoreToDraft`, `archiveQuestion`, `unarchiveQuestion`) implemented across backend router, question studio table, and detail modal.
+- Explicit `ARCHIVED` and `REJECTED` badges and filter tabs added.
+- All code compiles cleanly with 0 type errors (`pnpm exec tsc --noEmit`).
+- Ready for git commit and browser testing.
 
 ---
 
 ## 4. Previous Session Summaries
+
+### Session: 2026-09-18 (Horizontal Table Scroll Sliders)
+
+- What was done: Added horizontal scroll sliders (`overflow-x-auto` wrapper, `min-w-[1100px]`, `whitespace-nowrap` headers & action cells) to Question Studio and Reviewer Desk tables to prevent action buttons from clipping on narrow viewports.
+- What was committed: `48af4ba` (`feat: add horizontal scroll sliders with min-widths to question studio and reviewer desk tables`).
+- Build state: Verified `pnpm exec tsc --noEmit` with 0 type errors.
+- What's left: Browser testing of horizontal table sliding across multiple screen widths.
+- What to watch out for: Tables use an inner `overflow-x-auto` container with `min-w-[1100px]` inside the outer `rounded-2xl border overflow-hidden` wrapper to preserve corner radius.
+
+### Session: 2026-09-18 (Admin Direct Question Approval)
+
+- What was done: Implemented Admin Direct Question Approval with cancel-and-create assignment pattern, shared draft validation (`validateQuestionDraft`), shared client `getUserRoles`, and confirmation dialogs in table and modal.
+- What was committed: `b42d601` (`feat: admin direct question approval with immutable snapshot minting and assignment cancel-and-create pattern`), `1436538` (`docs update`).
+- Build state: Verified `pnpm exec tsc --noEmit` with 0 type errors.
+- What's left: Browser smoke test of direct approval flow and contest picker integration.
+- What to watch out for: Direct approval cancels active assignments without deleting them, preserving the audit trail while moving questions straight to `APPROVED`.
 
 ### Session: 2026-09-18 (Contest Access Control & Shared Components)
 

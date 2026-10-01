@@ -1083,3 +1083,282 @@ Expected: **0 type errors**.
    - Both assignments visible in question history.
 8. Navigate to **Contest Editor** → **Add from Question Bank** → verify the approved question is immediately listed.
 9. Verify the `validateQuestionDraft` refactor by attempting to approve an MCQ with <2 options or missing `correctOptionId` — expect a clear error toast.
+
+---
+
+# [EXECUTED] # Implementation Plan: Admin Question Lifecycle Controls (Reject, Recover to Draft, Archive & Unarchive)
+
+Enable administrators to have full governance over question lifecycles: hard-rejecting questions at any stage (with mandatory audit reason and cancel-and-create assignment preservation), recovering rejected questions back to `DRAFT` for creator revisions, and non-destructively shelving `APPROVED` questions via `ARCHIVED` with direct unarchive back to `APPROVED`.
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Semantic Distinctions & State Invariants**
+>
+> - **`REJECTED` is recoverable**: Moving a question to `REJECTED` halts all active peer-reviews and hides it from the Question Bank, but an Admin can transition it back to `DRAFT` so the creator can fix errors and resubmit.
+> - **`ARCHIVED` is restricted to `APPROVED`**: Only previously approved questions can enter `ARCHIVED` (shelved from future contests without deletion).
+> - **`ARCHIVED` recovers directly to `APPROVED`**: Because an archived question was already reviewed and approved, unarchiving it does not require re-review.
+> - **Existing Contests Remain Intact**: `contestQuestion` records reference immutable `questionVersion` snapshots. Rejecting or archiving an approved question will **not** break contests that already reference that question version; it simply removes it from `listQuestionBank` for new contest curation.
+
+> [!WARNING]
+> **Rejection from pure DRAFT without `questionVersion`**
+> For questions in `SUBMITTED_FOR_REVIEW`, `UNDER_REVIEW`, `CHANGES_REQUESTED`, or `APPROVED`, a `currentVersionId` exists, allowing the admin rejection to create a completed admin assignment and threaded `reviewComment`.
+> For pure `DRAFT` questions that have never been submitted, no `questionVersion` exists yet. In this case, `adminReject` will update the question status to `REJECTED` and record the reason in the audit log (and draft metadata) without creating a phantom assignment.
+
+---
+
+## State Transition Matrix
+
+| Action                | Current Status                                                                   | New Status | Who Can Perform | Assignment Effect                                                                         |
+| --------------------- | -------------------------------------------------------------------------------- | ---------- | --------------- | ----------------------------------------------------------------------------------------- |
+| `adminReject`         | `DRAFT`, `SUBMITTED_FOR_REVIEW`, `UNDER_REVIEW`, `CHANGES_REQUESTED`, `APPROVED` | `REJECTED` | Admin only      | Cancels active (`PENDING`/`IN_REVIEW`), creates completed admin assignment (if versioned) |
+| `adminRestoreToDraft` | `REJECTED`                                                                       | `DRAFT`    | Admin only      | None (creator now owns the draft again)                                                   |
+| `archiveQuestion`     | `APPROVED` only                                                                  | `ARCHIVED` | Admin only      | None (version remains intact)                                                             |
+| `unarchiveQuestion`   | `ARCHIVED` only                                                                  | `APPROVED` | Admin only      | None (restores to active Question Bank pool)                                              |
+
+---
+
+## Proposed Changes
+
+### 1. Backend: tRPC Router
+
+#### [MODIFY] [question-bank.ts](file:///d:/contest-platform/src/server/trpc/routers/question-bank.ts)
+
+- **Add `adminReject`**:
+  - Guard: `adminProcedure`.
+  - Input: `{ questionId: z.string(), reason: z.string().min(1, "Reason for rejection is required.") }`.
+  - Validate target question exists and `status !== "ARCHIVED"` and `status !== "REJECTED"`.
+  - If active assignments exist (`PENDING` or `IN_REVIEW`), cancel them (`status = "CANCELLED"`, `completedAt = new Date()`).
+  - If `target.currentVersionId` exists:
+    - Create new `questionAssignment` (`reviewerId = ctx.user.id`, `status = "COMPLETED"`, `completedAt = new Date()`).
+    - Insert `reviewComment` with the rejection reason.
+  - Update `question` table: `status = "REJECTED"`, `updatedAt = new Date()`.
+  - Insert `auditLog`: action `"ADMIN_REJECTED"` with reason in metadata.
+
+- **Add `adminRestoreToDraft`**:
+  - Guard: `adminProcedure`.
+  - Input: `{ questionId: z.string(), comment: z.string().optional() }`.
+  - Validate target question exists and `status === "REJECTED"`.
+  - Update `question` table: `status = "DRAFT"`, `updatedAt = new Date()`.
+  - If comment provided and `target.currentVersionId` exists, add note to review thread.
+  - Insert `auditLog`: action `"ADMIN_RESTORED_TO_DRAFT"`.
+
+- **Update `archiveQuestion`**:
+  - Enforce prerequisite check:
+    ```ts
+    if (target.status !== "APPROVED") {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Only APPROVED questions can be archived.",
+      });
+    }
+    ```
+  - Update `status = "ARCHIVED"`.
+
+- **Add `unarchiveQuestion`**:
+  - Guard: `adminProcedure`.
+  - Input: `{ questionId: z.string() }`.
+  - Validate target question exists and `status === "ARCHIVED"`.
+  - Update `question` table: `status = "APPROVED"`, `updatedAt = new Date()`.
+  - Insert `auditLog`: action `"QUESTION_UNARCHIVED"`.
+
+---
+
+### 2. Frontend: Question Studio (`/dashboard/questions`)
+
+#### [MODIFY] [page.tsx](file:///d:/contest-platform/src/app/dashboard/questions/page.tsx)
+
+- Update status filter options to ensure `REJECTED` and `ARCHIVED` are easily filterable.
+- Add Admin action buttons in the table row:
+  - When `isAdmin` and status is active (`DRAFT`, `CHANGES_REQUESTED`, `SUBMITTED_FOR_REVIEW`, `UNDER_REVIEW`, `APPROVED`): show a subtle "Reject" action with confirmation dialog requiring a rejection reason.
+  - When `isAdmin` and status is `REJECTED`: show "Restore to Draft" button.
+  - When `isAdmin` and status is `APPROVED`: show "Archive" action alongside existing actions.
+  - When `isAdmin` and status is `ARCHIVED`: show "Unarchive to Bank" button.
+
+---
+
+### 3. Frontend: Question Detail Modal
+
+#### [MODIFY] [question-detail-modal.tsx](file:///d:/contest-platform/src/app/dashboard/questions/question-detail-modal.tsx)
+
+- Integrate Admin controls in the modal header and actions footer:
+  - **Reject Dialog**: Textarea for mandatory rejection reason + confirmation.
+  - **Restore Dialog**: "Restore to Draft" confirmation for rejected questions.
+  - **Archive Dialog**: Confirmation to archive approved question.
+  - **Unarchive Dialog**: Confirmation to restore archived question directly to `APPROVED`.
+
+---
+
+### 4. Status Badges & Display
+
+#### [MODIFY] [question-status-badge.tsx](file:///d:/contest-platform/src/components/questions/question-status-badge.tsx)
+
+- Verify `REJECTED` (destructive red badge) and `ARCHIVED` (slate / zinc neutral badge) are styled consistently with modern dark/light mode tokens.
+
+---
+
+## Verification Plan
+
+### Automated Tests
+
+- Run `pnpm exec tsc --noEmit` to ensure strict type compliance across all router endpoints and UI components.
+
+### Manual Verification
+
+1. **Admin Reject from Approved**:
+   - Select an `APPROVED` question.
+   - Trigger Admin Reject with reason "Testing admin rejection".
+   - Verify status becomes `REJECTED`.
+   - Verify it disappears from `/dashboard/contests/*` question picker (`listQuestionBank`).
+   - Verify existing contest referencing this question still loads its version without errors.
+2. **Admin Restore to Draft**:
+   - Select the `REJECTED` question.
+   - Click "Restore to Draft".
+   - Verify status becomes `DRAFT`.
+   - Verify creator can now edit the draft content in Question Studio.
+3. **Archive & Unarchive**:
+   - Select an `APPROVED` question.
+   - Archive it -> status becomes `ARCHIVED`.
+   - Verify non-approved questions cannot be archived (throws error).
+   - Unarchive it -> status returns directly to `APPROVED` without needing re-review.
+
+---
+
+# Implementation Plan: Collaborative Question Content Editing (Creator, Reviewer, Admin)
+
+Enable **Creators**, **Reviewers**, and **Admins** to edit question content, problem descriptions, metadata, options, and test cases while a question is actively under review, submitted for review, changes requested, or in draft.
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Who Can Edit & When**
+> - **Creator**: Can edit when status is `DRAFT`, `CHANGES_REQUESTED`, `SUBMITTED_FOR_REVIEW`, or `UNDER_REVIEW`.
+> - **Assigned Reviewer**: Can edit while actively reviewing the question (`UNDER_REVIEW` or assigned `PENDING`).
+> - **Admin**: Can edit questions at any stage (`DRAFT`, `CHANGES_REQUESTED`, `SUBMITTED_FOR_REVIEW`, `UNDER_REVIEW`, `APPROVED`, `REJECTED`).
+>
+> **Version & Draft Invariant During Active Review**
+> When question content is edited while `UNDER_REVIEW` or `SUBMITTED_FOR_REVIEW`:
+> - `question.currentDraft` is updated with the new content.
+> - If `target.currentVersionId` points to an unapproved version snapshot (i.e. not yet in any contest), that active snapshot (`questionVersion`) is synchronized with the new content so that:
+>   1. The reviewer immediately sees the edits in both the spec panel and code runner.
+>   2. When the reviewer or admin clicks **Approve**, the resulting approved version contains the latest edits.
+>   3. Contests never see unapproved drafts (since contests only allow `APPROVED` questions).
+> - An optional revision note (e.g. *"Reviewer fixed sample test case output format"*) is automatically posted as a `reviewComment` to the discussion thread, notifying all parties.
+
+---
+
+## Open Questions
+
+1. **Automatic Review Thread Note on Edit**:
+   When an edit is saved during review, should the system prompt for an optional note (e.g., *"Clarified description and updated option B"*) to be posted to the discussion thread?
+   - **Recommendation**: Yes, provide an optional input field *"Revision note for review discussion (optional)"* in the editor save bar. If filled, it automatically posts as a system-annotated comment (`[CONTENT UPDATED]: <note>`).
+
+2. **Editing Approved Questions**:
+   Should Admins be allowed to edit content on already `APPROVED` questions?
+   - **Recommendation**: Yes, Admins can edit `currentDraft`. If an admin edits an approved question, we update `currentDraft` and the current approved snapshot (if not currently locked in an active live contest session), or prompt them to direct-approve an updated `v(N+1)` snapshot so existing past contests retain their exact original snapshot.
+
+---
+
+## Proposed Changes
+
+### 1. Backend: tRPC Router
+
+#### [MODIFY] [question-bank.ts](file:///d:/contest-platform/src/server/trpc/routers/question-bank.ts)
+
+- **Upgrade `updateDraft`**:
+  - Switch procedure from `creatorProcedure` to `creatorOrReviewerProcedure`.
+  - Update input schema to accept an optional revision note:
+    ```ts
+    z.object({
+      id: z.string(),
+      categoryId: z.string().optional().nullable(),
+      topicId: z.string().optional().nullable(),
+      difficulty: z.enum(["easy", "medium", "hard"]).optional(),
+      draft: questionDraftSchema,
+      changeNote: z.string().optional(),
+    })
+    ```
+  - Refactor permission check:
+    - Allow if:
+      - `target.createdById === ctx.user.id` (Creator)
+      - OR `ctx.roles.includes("admin")` (Admin)
+      - OR user is an assigned reviewer for this question on an active assignment (`assignment.reviewerId === ctx.user.id` where `assignment.questionId === target.id`).
+  - Refactor status check:
+    - Allow when `target.status` is `DRAFT`, `CHANGES_REQUESTED`, `SUBMITTED_FOR_REVIEW`, `UNDER_REVIEW`, or `APPROVED` (for admin).
+  - Synchronize active version snapshot:
+    - If `target.currentVersionId` exists and `target.status !== "APPROVED"`:
+      - Update the active `questionVersion` row with the new `title`, `description`, `options`, `correctOptionId`, `hint`, `questionScore`, `starterCode`, `allowedLanguages`, `timeLimit`, `memoryLimit`, `testCases`.
+  - Update `question` table:
+    - Set `currentDraft = input.draft`, `difficulty`, `categoryId`, `topicId`, `updatedAt = new Date()`.
+  - Thread comment & audit log:
+    - If `changeNote` is provided:
+      - Insert `reviewComment`: `"[QUESTION EDITED by <Role>]: <changeNote>"`.
+    - Insert `auditLog`: action `"QUESTION_DRAFT_UPDATED"`.
+
+---
+
+### 2. Frontend: Question Detail Modal (`QuestionDetailModal`)
+
+#### [MODIFY] [question-detail-modal.tsx](file:///d:/contest-platform/src/app/dashboard/questions/question-detail-modal.tsx)
+
+- Add **Edit Mode** state: `const [isEditing, setIsEditing] = useState(false);`
+- Add form state pre-populated with current question draft / version:
+  - `editTitle`, `editDescription`, `editHint`, `editScore`, `editDifficulty`, `editCategoryId`, `editTopicId`
+  - `editOptions`, `editCorrectOptionId` (for MCQ)
+  - `editTimeLimit`, `editMemoryLimit`, `editStarterPython`, `editTestCases` (for Code)
+  - `changeNote` (optional note for discussion thread)
+- Add permission check:
+  - `canEdit = isAdmin || q.createdById === session?.user?.id || q.assignments?.some(a => a.reviewerId === session?.user?.id && ["PENDING", "IN_REVIEW"].includes(a.status))`
+- Header & Toolbar:
+  - Render **"Edit Question"** button (with `PencilEdit02Icon`) when `canEdit && !isEditing`.
+  - When `isEditing`:
+    - Display **"Save Changes"** (green button, calls `updateDraftMutation`) and **"Cancel"** button.
+    - Show optional *"Revision note (posted to discussion thread)"* input.
+- Specification Panel:
+  - When `isEditing`: render interactive inputs for title, difficulty, score, markdown description with write/preview tabs, MCQ options editor with add/remove/correct-pick, and Code test case editor with add/remove/sample-toggle.
+  - When not editing: render rich read-only display with markdown renderer (existing behavior).
+
+---
+
+### 3. Frontend: Reviewer Desk (`src/app/dashboard/reviews/page.tsx`)
+
+#### [MODIFY] [page.tsx](file:///d:/contest-platform/src/app/dashboard/reviews/page.tsx)
+
+- Integrate the same in-place question content editing capability into the Reviewer Desk modal:
+  - Add **"Edit Question"** button to the top action bar when assignment is `IN_REVIEW` or user is Admin.
+  - Reviewer can adjust test cases, wording, or MCQ options directly while reviewing.
+  - Clicking "Save Changes" invokes `updateDraft`, updates the active version, and posts the change note to the chat thread.
+
+---
+
+## Verification Plan
+
+### Automated Tests
+- Run `pnpm exec tsc --noEmit` to ensure 0 TypeScript compilation errors.
+
+### Manual Verification
+1. **Reviewer In-Review Edit**:
+   - Log in as Reviewer.
+   - Pick up a question in Reviewer Desk -> status is `IN_REVIEW`.
+   - Click "Edit Question" -> modify description and fix a typo in Option B.
+   - Add revision note: *"Fixed typo in option B"*.
+   - Click "Save Changes".
+   - Verify:
+     - Changes are immediately saved and displayed.
+     - Note appears in `<ReviewDiscussionThread />`.
+     - Reviewer clicks "Approve".
+     - In Question Bank / Contests, verify the approved question contains the fixed typo.
+2. **Creator Reply with Content Edit**:
+   - Log in as Reviewer -> Request changes on a question with comment *"Add 1 more edge test case"*.
+   - Log in as Creator -> Open Question Detail Modal.
+   - Click "Edit Question" -> add new test case, save with note *"Added edge test case for n=0"*.
+   - Verify question is updated and note is posted.
+   - Creator clicks "Re-submit to Reviewer".
+3. **Admin Direct Edit**:
+   - Log in as Admin -> Open any question in Question Studio or Reviewer Desk.
+   - Verify Admin can edit content at any stage and save successfully.
+

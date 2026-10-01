@@ -63,6 +63,22 @@ git revert --no-edit HEAD
 pnpm exec tsc --noEmit
 ```
 
+### Recipe D: Revert Admin Question Lifecycle Controls
+If the Admin Reject, Restore to Draft, Archive, and Unarchive controls need to be backed out:
+```bash
+# Revert the lifecycle controls commit
+git revert --no-edit HEAD
+
+# Files restored by revert:
+# - src/server/trpc/routers/question-bank.ts (removes adminReject, adminRestoreToDraft, unarchiveQuestion, reverts archiveQuestion)
+# - src/components/questions/question-status-badge.tsx (reverts explicit ARCHIVED badge)
+# - src/app/dashboard/questions/page.tsx (removes reject/restore/archive/unarchive table actions & dialogs)
+# - src/app/dashboard/questions/question-detail-modal.tsx (removes reject/restore/archive/unarchive modal actions & dialogs)
+
+# Verify build
+pnpm exec tsc --noEmit
+```
+
 ---
 
 ## 3. Post-Revert Verification Checklist

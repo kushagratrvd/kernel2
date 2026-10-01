@@ -93,6 +93,18 @@ export function QuestionStatusBadge({ status, className }: QuestionStatusBadgePr
           Pending Pickup
         </Badge>
       );
+    case "ARCHIVED":
+      return (
+        <Badge
+          variant="outline"
+          className={`bg-zinc-500/10 text-zinc-400 border-zinc-500/30 text-2xs font-bold uppercase gap-1 ${
+            className || ""
+          }`}
+        >
+          <span className="size-1.5 rounded-full bg-zinc-400" />
+          Archived
+        </Badge>
+      );
     case "CANCELLED":
       return (
         <Badge

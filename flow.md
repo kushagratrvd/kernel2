@@ -321,3 +321,53 @@
   - `trpc.contest.executeCodeTest`: calls `executeSubmission()` in [`src/server/codebox.ts`](file:///d:/contest-platform/src/server/codebox.ts) for live compilation and execution against sample test cases.
   - `trpc.contest.submitCode`: runs all hidden test cases via Codebox, records submission rows, and computes total problem score.
   - `trpc.contest.finishAttempt`: sets `finishedAt = NOW()`, computes final contest ranking.
+
+---
+
+## 7. Admin Question Lifecycle Controls Flow (Reject, Recover to Draft, Archive & Unarchive)
+
+```
+                       [ Question in Any Status ]
+                                    │
+               ┌────────────────────┼────────────────────┐
+               ▼                    ▼                    ▼
+       [ "Admin Reject" ]   [ "Restore Draft" ]   [ "Archive / Unarchive" ]
+               │                    │                    │
+   (Any active status except   (Status must be     (ARCHIVED: only from APPROVED;
+    ARCHIVED/REJECTED)          REJECTED)           UNARCHIVED: returns to APPROVED)
+               │                    │                    │
+               ▼                    ▼                    ▼
+       adminReject({        adminRestoreToDraft({  archiveQuestion({ questionId })
+         questionId,          questionId,          unarchiveQuestion({ questionId })
+         reason               comment })                 │
+       })                           │                    │
+               │                    │                    │
+               ▼                    ▼                    ▼
+      PostgreSQL TX:       PostgreSQL TX:        PostgreSQL:
+      ├── CANCEL active    ├── UPDATE question   ├── UPDATE question
+      │   assignments          status='DRAFT'        status='ARCHIVED' / 'APPROVED'
+      ├── If versioned,    ├── If comment,       └── auditLog
+      │   INSERT COMPLETED     add note to thread
+      │   admin assignment └── auditLog
+      ├── INSERT review
+      │   comment
+      ├── UPDATE question
+      │   status='REJECTED'
+      └── auditLog
+               │                    │                    │
+               ▼                    ▼                    ▼
+      Halted & hidden from   Creator can edit     Non-destructively shelved
+      active Question Bank;  draft & re-submit    from future contest selection;
+      recoverable by Admin   for review           existing contests unaffected
+```
+
+- **Entry Points**:
+  - Table action buttons & confirmation dialogs in [`src/app/dashboard/questions/page.tsx`](file:///d:/contest-platform/src/app/dashboard/questions/page.tsx)
+  - Header action buttons & dialogs in [`src/app/dashboard/questions/question-detail-modal.tsx`](file:///d:/contest-platform/src/app/dashboard/questions/question-detail-modal.tsx)
+- **Functions Called**:
+  - `trpc.questionBank.adminReject`: transitions question to `REJECTED`, cancels active peer assignments, creates completed admin assignment (if versioned), and appends rejection reason to discussion thread.
+  - `trpc.questionBank.adminRestoreToDraft`: transitions question from `REJECTED` back to `DRAFT`, allowing author to revise `currentDraft` and resubmit.
+  - `trpc.questionBank.archiveQuestion`: transitions question from `APPROVED` to `ARCHIVED`, hiding it from future contest creation while preserving existing `contestQuestion` references.
+  - `trpc.questionBank.unarchiveQuestion`: transitions question from `ARCHIVED` directly back to `APPROVED` without requiring re-review.
+- **Security Check**: All 4 endpoints are strictly guarded by `adminProcedure` in [`src/server/trpc/init.ts`](file:///d:/contest-platform/src/server/trpc/init.ts).
+

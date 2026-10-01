@@ -1091,24 +1091,223 @@ export const questionBankRouter = createTRPCRouter({
       });
     }),
 
-  // Archive question
+  // Hard-reject question from any active status by Administrator.
+  // Cancels any active peer assignments, creates a completed admin assignment (if versioned),
+  // writes rejection comment to review thread, and sets status = REJECTED.
+  adminReject: adminProcedure
+    .input(
+      z.object({
+        questionId: z.string(),
+        reason: z.string().min(1, "Reason for rejection is required."),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      return await ctx.db.transaction(async (tx) => {
+        const target = await tx.query.question.findFirst({
+          where: eq(question.id, input.questionId),
+        });
+
+        if (!target) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Question not found." });
+        }
+
+        if (target.status === "ARCHIVED" || target.status === "REJECTED") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Cannot reject a question that is already ${target.status}.`,
+          });
+        }
+
+        // 1. Cancel any active peer-review assignments
+        await tx
+          .update(questionAssignment)
+          .set({ status: "CANCELLED", completedAt: new Date() })
+          .where(
+            and(
+              eq(questionAssignment.questionId, target.id),
+              inArray(questionAssignment.status, ["PENDING", "IN_REVIEW"])
+            )
+          );
+
+        let assignmentId: string | null = null;
+        // 2. If question possesses a version snapshot, link rejection activity into review thread
+        if (target.currentVersionId) {
+          assignmentId = crypto.randomUUID();
+          await tx.insert(questionAssignment).values({
+            id: assignmentId,
+            questionId: target.id,
+            versionId: target.currentVersionId,
+            reviewerId: ctx.user.id,
+            assignedById: target.createdById,
+            status: "COMPLETED",
+            completedAt: new Date(),
+          });
+
+          await tx.insert(reviewComment).values({
+            id: crypto.randomUUID(),
+            questionId: target.id,
+            assignmentId: assignmentId,
+            userId: ctx.user.id,
+            message: `[REJECTED BY ADMIN]: ${input.reason.trim()}`,
+          });
+        }
+
+        // 3. Update question status to REJECTED
+        await tx
+          .update(question)
+          .set({ status: "REJECTED", updatedAt: new Date() })
+          .where(eq(question.id, target.id));
+
+        // 4. Audit log
+        await tx.insert(auditLog).values({
+          id: crypto.randomUUID(),
+          userId: ctx.user.id,
+          action: "ADMIN_REJECTED",
+          entityType: "question",
+          entityId: target.id,
+          metadata: {
+            reason: input.reason.trim(),
+            previousStatus: target.status,
+            versionId: target.currentVersionId,
+            assignmentId,
+          },
+        });
+
+        return { success: true, status: "REJECTED" };
+      });
+    }),
+
+  // Restore rejected question back to DRAFT for creator revisions
+  adminRestoreToDraft: adminProcedure
+    .input(
+      z.object({
+        questionId: z.string(),
+        comment: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      return await ctx.db.transaction(async (tx) => {
+        const target = await tx.query.question.findFirst({
+          where: eq(question.id, input.questionId),
+        });
+
+        if (!target) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Question not found." });
+        }
+
+        if (target.status !== "REJECTED") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Only REJECTED questions can be restored to DRAFT. Current status: ${target.status}.`,
+          });
+        }
+
+        // 1. Move back to DRAFT so creator can edit currentDraft and resubmit
+        await tx
+          .update(question)
+          .set({ status: "DRAFT", updatedAt: new Date() })
+          .where(eq(question.id, target.id));
+
+        // 2. If comment provided, append to the latest assignment thread
+        if (input.comment?.trim()) {
+          const latestAssignment = await tx.query.questionAssignment.findFirst({
+            where: eq(questionAssignment.questionId, target.id),
+            orderBy: (a, { desc }) => [desc(a.assignedAt)],
+          });
+          if (latestAssignment) {
+            await tx.insert(reviewComment).values({
+              id: crypto.randomUUID(),
+              questionId: target.id,
+              assignmentId: latestAssignment.id,
+              userId: ctx.user.id,
+              message: `[RESTORED TO DRAFT BY ADMIN]: ${input.comment.trim()}`,
+            });
+          }
+        }
+
+        // 3. Audit log
+        await tx.insert(auditLog).values({
+          id: crypto.randomUUID(),
+          userId: ctx.user.id,
+          action: "ADMIN_RESTORED_TO_DRAFT",
+          entityType: "question",
+          entityId: target.id,
+          metadata: {
+            comment: input.comment?.trim(),
+          },
+        });
+
+        return { success: true, status: "DRAFT" };
+      });
+    }),
+
+  // Archive question — strictly permitted ONLY for APPROVED questions.
+  // Shelves the question from future contest selection without destroying the immutable version snapshot.
   archiveQuestion: adminProcedure
     .input(z.object({ questionId: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const target = await ctx.db.query.question.findFirst({
+        where: eq(question.id, input.questionId),
+      });
+
+      if (!target) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Question not found." });
+      }
+
+      if (target.status !== "APPROVED") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Only APPROVED questions can be archived. Current status: ${target.status}.`,
+        });
+      }
+
       const [updated] = await ctx.db
         .update(question)
         .set({ status: "ARCHIVED", updatedAt: new Date() })
         .where(eq(question.id, input.questionId))
         .returning();
 
-      if (!updated) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Question not found." });
-      }
-
       await ctx.db.insert(auditLog).values({
         id: crypto.randomUUID(),
         userId: ctx.user.id,
         action: "QUESTION_ARCHIVED",
+        entityType: "question",
+        entityId: input.questionId,
+      });
+
+      return updated;
+    }),
+
+  // Unarchive question — restores an ARCHIVED question back to APPROVED.
+  // Does NOT require re-review because the immutable snapshot was already verified and approved.
+  unarchiveQuestion: adminProcedure
+    .input(z.object({ questionId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const target = await ctx.db.query.question.findFirst({
+        where: eq(question.id, input.questionId),
+      });
+
+      if (!target) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Question not found." });
+      }
+
+      if (target.status !== "ARCHIVED") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Only ARCHIVED questions can be unarchived. Current status: ${target.status}.`,
+        });
+      }
+
+      const [updated] = await ctx.db
+        .update(question)
+        .set({ status: "APPROVED", updatedAt: new Date() })
+        .where(eq(question.id, input.questionId))
+        .returning();
+
+      await ctx.db.insert(auditLog).values({
+        id: crypto.randomUUID(),
+        userId: ctx.user.id,
+        action: "QUESTION_UNARCHIVED",
         entityType: "question",
         entityId: input.questionId,
       });

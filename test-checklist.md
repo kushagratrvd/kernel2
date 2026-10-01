@@ -91,6 +91,41 @@
      - Question status transitions immediately to **Approved** (`APPROVED`).
      - Question is immediately selectable in Contest Editor's "Add from Question Bank".
 
+### Test 3.5: Admin Universal Rejection Workflow
+1. Admin opens `/dashboard/questions` and locates any question in active status (`DRAFT`, `CHANGES_REQUESTED`, `SUBMITTED_FOR_REVIEW`, `UNDER_REVIEW`, or `APPROVED`).
+2. Clicks "Reject" in table or Question Detail Modal.
+   - **Verification**: Rejection dialog opens with required "Reason for Rejection" textarea and "Confirm Rejection" button disabled if empty.
+3. Enters rejection reason and confirms.
+   - **Verification**:
+     - Status updates immediately to **"Rejected"** (red badge).
+     - Any active peer assignment transitions to `CANCELLED`.
+     - If version snapshot exists, a completed admin assignment is inserted with `[REJECTED BY ADMIN]: <reason>` in discussion thread.
+     - Question ceases to appear in Contest Question Picker (`listQuestionBank`).
+     - Audit log records `ADMIN_REJECTED`.
+
+### Test 3.6: Admin Restore to Draft Workflow
+1. Admin filters by `REJECTED` in Question Studio table.
+2. Clicks "Restore to Draft" in table or Detail Modal.
+3. Optional guidance note is entered and confirmed.
+   - **Verification**:
+     - Status updates to **"Draft"** (`DRAFT`).
+     - Question author can now edit draft problem statement, test cases, and options in Question Studio.
+     - "Submit to Reviewer" button becomes available again for author.
+     - Audit log records `ADMIN_RESTORED_TO_DRAFT`.
+
+### Test 3.7: Admin Archive & Unarchive Workflow
+1. Admin locates an `APPROVED` question.
+2. Clicks "Archive" and confirms.
+   - **Verification**:
+     - Status updates to **"Archived"** (`ARCHIVED` badge).
+     - Question is removed from Question Bank contest picker.
+     - Any existing contests using this question version remain unaffected and operational.
+3. Admin clicks "Unarchive to Bank" on the archived question.
+   - **Verification**:
+     - Status restores directly to **"Approved"** (`APPROVED`).
+     - Question immediately reappears in Question Bank contest picker without requiring re-review.
+     - Audit log records `QUESTION_UNARCHIVED`.
+
 ---
 
 ## 4. Code Execution & Codebox Sandbox Tests
