@@ -4,6 +4,24 @@
 
 ---
 
+# [EXECUTED] Implementation Plan: Creator Draft Editing Flow in Question Studio & Detail Modal
+
+### Context & Need
+Creators drafting or revising questions (in `DRAFT` or `CHANGES_REQUESTED` status) need an intuitive way in the web interface to edit problem statements, hints, scores, options, test cases, and taxonomy tags. While the backend mutation `questionBank.updateDraft` was implemented, the Question Studio table, detail modal, and review discussion thread lacked an "Edit Draft" action and form prefilling mechanism.
+
+### Key Changes
+1. **Creator Question Studio Table ([src/app/dashboard/questions/page.tsx](file:///d:/contest-platform/src/app/dashboard/questions/page.tsx))**:
+   - Add `updateDraftMutation` hooked to `trpc.questionBank.updateDraft`.
+   - Add `editingQuestionId` state and `handleOpenEdit(question)` to populate all form fields (title, description, score, hint, options, test cases, taxonomy).
+   - Add "Edit Draft" button to table action column for questions in `DRAFT` or `CHANGES_REQUESTED` owned by the user (or admin).
+   - Update editor dialog to dynamic mode (Create vs. Edit) with type guard and dynamic submit action.
+2. **Question Detail Modal ([src/app/dashboard/questions/question-detail-modal.tsx](file:///d:/contest-platform/src/app/dashboard/questions/question-detail-modal.tsx))**:
+   - Add `onEditDraft` prop and header "Edit Draft" button for editable questions.
+3. **Review Discussion Thread ([src/components/questions/review-discussion-thread.tsx](file:///d:/contest-platform/src/components/questions/review-discussion-thread.tsx))**:
+   - Add `onEditDraft` action in `CHANGES_REQUESTED` feedback banner next to re-submit button.
+
+---
+
 # Implementation Plan: Contests and Multi-type Problems (MCQ, Text, Code)
 
 This plan details the addition of full support for creating contests and problems of three types (`mcq`, `text`, and `code`), executing student programming submissions securely against the CodeBox engine, and providing a premium student workspace with split resizable panels and Monaco Editor.

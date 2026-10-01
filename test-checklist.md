@@ -56,6 +56,19 @@
      - Badge updates to `Submitted` (`SUBMITTED_FOR_REVIEW`).
      - Assignment appears in Reviewer Desk queue with `Pending Pickup`.
 
+### Test 3.1b: Question Draft Editing
+1. Creator clicks "Edit Draft" on a question in `DRAFT` or `CHANGES_REQUESTED` status.
+   - **Verification**:
+     - Modal opens with title "Edit Question Draft".
+     - All inputs (title, description, hint, score, options/test cases, taxonomy) prefill correctly from `currentDraft`.
+     - Question Type is displayed in read-only badge to prevent accidental schema mutation.
+2. Creator updates title, description, or test cases, and clicks "Save Changes".
+   - **Verification**:
+     - `trpc.questionBank.updateDraft` executes successfully.
+     - Modal closes, toast "Draft updated successfully!" appears.
+     - Table updates immediately with new title, description, and score.
+     - Question status remains `DRAFT` (or `CHANGES_REQUESTED`) until explicitly submitted.
+
 ### Test 3.2: Reviewer Discussion & "Changes Requested"
 1. Reviewer clicks "Pick Up" -> status becomes `In Review` (`IN_REVIEW`).
 2. Reviewer opens review modal and sends feedback comment.

@@ -85,6 +85,7 @@ function QuestionsStudioContent() {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [isCreateOpen, setIsCreateOpen] = useState(searchParams?.get("action") === "new");
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   const [isSubmitOpen, setIsSubmitOpen] = useState(false);
   const [selectedQuestionForSubmit, setSelectedQuestionForSubmit] = useState<string | null>(null);
   const [selectedDetailQuestionId, setSelectedDetailQuestionId] = useState<string | null>(null);
@@ -216,6 +217,24 @@ function QuestionsStudioContent() {
         setIsCreateOpen(false);
         resetForm();
         refetch();
+        toast.success("Working draft created successfully!");
+      },
+      onError: (err) => {
+        toast.error(err.message || "Failed to create question draft.");
+      },
+    })
+  );
+
+  const updateDraftMutation = useMutation(
+    trpc.questionBank.updateDraft.mutationOptions({
+      onSuccess: () => {
+        setIsCreateOpen(false);
+        resetForm();
+        refetch();
+        toast.success("Draft updated successfully!");
+      },
+      onError: (err) => {
+        toast.error(err.message || "Failed to update draft.");
       },
     })
   );
@@ -228,15 +247,26 @@ function QuestionsStudioContent() {
         setSelectedReviewerId("");
         setSubmitComment("");
         refetch();
+        toast.success("Question submitted for review!");
+      },
+      onError: (err) => {
+        toast.error(err.message || "Failed to submit for review.");
       },
     })
   );
 
   const resetForm = () => {
+    setEditingQuestionId(null);
+    setQuestionType("mcq");
+    setDifficulty("medium");
+    setCategoryId("");
+    setTopicId("");
     setTitle("");
     setDescription("");
     setHint("");
     setQuestionScore(100);
+    setTimeLimit(5);
+    setMemoryLimit(128000);
     setOptions([
       { id: "opt_a", text: "Option A" },
       { id: "opt_b", text: "Option B" },
@@ -246,9 +276,47 @@ function QuestionsStudioContent() {
     setStarterPython("# Write your solution\n");
   };
 
-  const handleCreateQuestion = async () => {
+  const handleOpenEdit = (q: any) => {
+    const draft = (q.currentDraft as any) || (q.currentVersion as any) || {};
+    setEditingQuestionId(q.id);
+    setQuestionType((q.questionType as QuestionType) || "mcq");
+    setDifficulty((q.difficulty as Difficulty) || "medium");
+    setCategoryId(q.categoryId || "");
+    setTopicId(q.topicId || "");
+    setTitle(draft.title || "");
+    setDescription(draft.description || "");
+    setHint(draft.hint || "");
+    setQuestionScore(draft.questionScore || 100);
+    setTimeLimit(draft.timeLimit || 5);
+    setMemoryLimit(draft.memoryLimit || 128000);
+
+    if (q.questionType === "mcq") {
+      setOptions(
+        draft.options && Array.isArray(draft.options) && draft.options.length > 0
+          ? draft.options
+          : [
+              { id: "opt_a", text: "Option A" },
+              { id: "opt_b", text: "Option B" },
+            ]
+      );
+      setCorrectOptionId(draft.correctOptionId || draft.options?.[0]?.id || "opt_a");
+    } else if (q.questionType === "text") {
+      setCorrectOptionId(draft.correctOptionId || "");
+    } else if (q.questionType === "code") {
+      setStarterPython(draft.starterCode?.["71"] || draft.starterCode?.python || "# Write your solution\n");
+      setTestCases(
+        draft.testCases && Array.isArray(draft.testCases) && draft.testCases.length > 0
+          ? draft.testCases
+          : [{ input: "1 2", expectedOutput: "3", isSample: true }]
+      );
+    }
+
+    setIsCreateOpen(true);
+  };
+
+  const handleSaveQuestion = async () => {
     if (!title.trim() || !description.trim()) {
-      alert("Please provide both a title and description.");
+      toast.error("Please provide both a title and description.");
       return;
     }
 
@@ -272,13 +340,23 @@ function QuestionsStudioContent() {
       draftPayload.testCases = testCases;
     }
 
-    await createMutation.mutateAsync({
-      questionType,
-      difficulty,
-      categoryId: categoryId || null,
-      topicId: topicId || null,
-      draft: draftPayload,
-    });
+    if (editingQuestionId) {
+      await updateDraftMutation.mutateAsync({
+        id: editingQuestionId,
+        categoryId: categoryId || null,
+        topicId: topicId || null,
+        difficulty,
+        draft: draftPayload,
+      });
+    } else {
+      await createMutation.mutateAsync({
+        questionType,
+        difficulty,
+        categoryId: categoryId || null,
+        topicId: topicId || null,
+        draft: draftPayload,
+      });
+    }
   };
 
   const handleOpenSubmit = (qId: string) => {
@@ -563,6 +641,19 @@ function QuestionsStudioContent() {
                             View & Review
                           </Button>
 
+                          {(q.status === "DRAFT" || q.status === "CHANGES_REQUESTED") &&
+                            (q.createdById === session?.user?.id || isAdmin) && (
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() => handleOpenEdit(q)}
+                                className="rounded-xl gap-1 text-amber-500 hover:bg-amber-500/10 border-amber-500/30 text-2xs font-semibold"
+                              >
+                                <HugeiconsIcon icon={PencilEdit02Icon} className="size-3" />
+                                Edit Draft
+                              </Button>
+                            )}
+
                           {isAdmin &&
                             ["DRAFT", "CHANGES_REQUESTED", "SUBMITTED_FOR_REVIEW", "UNDER_REVIEW"].includes(
                               q.status
@@ -681,33 +772,63 @@ function QuestionsStudioContent() {
         )}
       </main>
 
-      {/* Create Question Modal */}
-      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+      {/* Create / Edit Question Modal */}
+      <Dialog
+        open={isCreateOpen}
+        onOpenChange={(open) => {
+          setIsCreateOpen(open);
+          if (!open) {
+            resetForm();
+          }
+        }}
+      >
         <DialogContent className="max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto rounded-3xl">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold">Create New Question Draft</DialogTitle>
+            <DialogTitle className="text-xl font-bold">
+              {editingQuestionId ? "Edit Question Draft" : "Create New Question Draft"}
+            </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-5 py-2">
             {/* Type & Difficulty Row */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Question Type</Label>
-                <Select
-                  value={questionType}
-                  onValueChange={(val) => {
-                    if (val) setQuestionType(val as QuestionType);
-                  }}
-                >
-                  <SelectTrigger className="rounded-xl">
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="mcq">Multiple Choice (MCQ)</SelectItem>
-                    <SelectItem value="text">Short Answer (Text)</SelectItem>
-                    <SelectItem value="code">Coding (Judge0/Codebox)</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold">Question Type</Label>
+                  {editingQuestionId && (
+                    <span className="text-3xs text-muted-foreground font-mono">(locked for existing draft)</span>
+                  )}
+                </div>
+                {editingQuestionId ? (
+                  <div className="px-3 py-2 rounded-xl bg-muted/40 border border-border/40 text-xs font-semibold uppercase text-foreground flex items-center justify-between">
+                    <span>
+                      {questionType === "mcq"
+                        ? "Multiple Choice (MCQ)"
+                        : questionType === "text"
+                        ? "Short Answer (Text)"
+                        : "Coding (Judge0/Codebox)"}
+                    </span>
+                    <Badge variant="outline" className="text-3xs uppercase font-mono">
+                      {questionType}
+                    </Badge>
+                  </div>
+                ) : (
+                  <Select
+                    value={questionType}
+                    onValueChange={(val) => {
+                      if (val) setQuestionType(val as QuestionType);
+                    }}
+                  >
+                    <SelectTrigger className="rounded-xl">
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="mcq">Multiple Choice (MCQ)</SelectItem>
+                      <SelectItem value="text">Short Answer (Text)</SelectItem>
+                      <SelectItem value="code">Coding (Judge0/Codebox)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -1009,16 +1130,29 @@ function QuestionsStudioContent() {
           </div>
 
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setIsCreateOpen(false)} className="rounded-xl">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsCreateOpen(false);
+                resetForm();
+              }}
+              className="rounded-xl"
+            >
               Cancel
             </Button>
             <Button
-              onClick={handleCreateQuestion}
-              disabled={createMutation.isPending}
+              onClick={handleSaveQuestion}
+              disabled={createMutation.isPending || updateDraftMutation.isPending}
               className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-xl gap-2 font-semibold"
             >
-              {createMutation.isPending ? <Spinner className="size-4" /> : <HugeiconsIcon icon={AddCircleIcon} className="size-4" />}
-              Save Working Draft
+              {createMutation.isPending || updateDraftMutation.isPending ? (
+                <Spinner className="size-4" />
+              ) : editingQuestionId ? (
+                <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
+              ) : (
+                <HugeiconsIcon icon={AddCircleIcon} className="size-4" />
+              )}
+              {editingQuestionId ? "Save Changes" : "Save Working Draft"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1089,6 +1223,7 @@ function QuestionsStudioContent() {
           refetch();
         }}
         onSubmitForReview={(qId) => handleOpenSubmit(qId)}
+        onEditDraft={(q) => handleOpenEdit(q)}
       />
 
       {/* Admin Direct Approval Confirmation Dialog */}

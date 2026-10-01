@@ -49,6 +49,7 @@ interface QuestionDetailModalProps {
   open: boolean;
   onClose: () => void;
   onSubmitForReview?: (questionId: string) => void;
+  onEditDraft?: (question: any) => void;
 }
 
 export function QuestionDetailModal({
@@ -56,6 +57,7 @@ export function QuestionDetailModal({
   open,
   onClose,
   onSubmitForReview,
+  onEditDraft,
 }: QuestionDetailModalProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -325,6 +327,14 @@ export function QuestionDetailModal({
             }
           : undefined
       }
+      onEditDraft={
+        onEditDraft && q
+          ? () => {
+              onClose();
+              onEditDraft(q);
+            }
+          : undefined
+      }
       isAdmin={isAdmin}
       onDirectApprove={() => setConfirmApproveOpen(true)}
       isDirectApproving={directApproveMutation.isPending}
@@ -387,6 +397,24 @@ export function QuestionDetailModal({
 
             {/* View Mode Switcher and Admin Actions */}
             <div className="flex items-center gap-2 self-start sm:self-auto shrink-0 flex-wrap">
+              {/* Creator Edit Draft Button */}
+              {(q?.status === "DRAFT" || q?.status === "CHANGES_REQUESTED") &&
+                (q?.createdById === session?.user?.id || isAdmin) &&
+                onEditDraft && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      onClose();
+                      onEditDraft(q);
+                    }}
+                    className="rounded-xl gap-1.5 text-amber-500 hover:bg-amber-500/10 border-amber-500/30 text-xs font-semibold"
+                  >
+                    <HugeiconsIcon icon={PencilEdit02Icon} className="size-4" />
+                    Edit Draft
+                  </Button>
+                )}
+
               {canDirectApprove && (
                 <Button
                   size="sm"

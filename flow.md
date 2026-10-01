@@ -41,6 +41,31 @@
   - `question`: New row with `status = "DRAFT"`, `createdById = ctx.user.id`.
   - `questionDraft`: Stores options, test cases, hint, starter code, time/memory limits.
 
+### 1.1 Question Draft Editing Flow
+
+```
+[ Creator / Admin ]
+    │
+    │  1. Clicks "Edit Draft" in Table or Detail Modal (status in DRAFT | CHANGES_REQUESTED)
+    ▼
+[ UI: Question Studio Modal in Edit Mode ]
+    │
+    │  2. Form prefilled with currentDraft, options, testCases, taxonomy
+    │  3. User edits fields and clicks "Save Changes"
+    ▼
+[ TRPC: questionBankRouter.updateDraft ]
+    │
+    │  4. Checks ownership (createdById === ctx.user.id || isAdmin)
+    │  5. Verifies status in ('DRAFT', 'CHANGES_REQUESTED')
+    │  6. UPDATE "question" SET current_draft = payload, updated_at = NOW()
+    ▼
+[ PostgreSQL (Drizzle ORM) ]
+    │
+    │  7. Returns updated question record
+    ▼
+[ UI: Closes modal, invalidates listMyQuestions cache, shows success toast ]
+```
+
 ---
 
 ## 2. Question Submission & Immutable Snapshot Minting Flow

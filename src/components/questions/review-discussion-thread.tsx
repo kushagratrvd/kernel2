@@ -14,6 +14,7 @@ import {
   CheckmarkCircle02Icon,
   AlertCircleIcon,
   HourglassIcon,
+  PencilEdit02Icon,
 } from "@hugeicons/core-free-icons";
 import { toast } from "sonner";
 
@@ -25,6 +26,7 @@ interface ReviewDiscussionThreadProps {
   assignmentStatus?: string | null;
   onCommentAdded?: () => void;
   onSubmitForReview?: (questionId: string) => void;
+  onEditDraft?: (questionId: string) => void;
   isAdmin?: boolean;
   onDirectApprove?: () => void;
   isDirectApproving?: boolean;
@@ -40,6 +42,7 @@ export function ReviewDiscussionThread({
   assignmentStatus,
   onCommentAdded,
   onSubmitForReview,
+  onEditDraft,
   isAdmin,
   onDirectApprove,
   isDirectApproving,
@@ -95,16 +98,29 @@ export function ReviewDiscussionThread({
               <p className="text-2xs text-amber-400/90 leading-relaxed">
                 Adjustments were requested according to the feedback messages below.
               </p>
-              {onSubmitForReview && (
-                <div className="pt-1">
-                  <Button
-                    size="xs"
-                    onClick={() => onSubmitForReview(questionId)}
-                    className="rounded-xl gap-1 text-2xs font-semibold bg-amber-600 hover:bg-amber-700 text-white shadow-xs"
-                  >
-                    <HugeiconsIcon icon={SentIcon} className="size-3" />
-                    Re-submit to Reviewer
-                  </Button>
+              {(onEditDraft || onSubmitForReview) && (
+                <div className="pt-1 flex items-center gap-2 flex-wrap">
+                  {onEditDraft && (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => onEditDraft(questionId)}
+                      className="rounded-xl gap-1 text-2xs font-semibold text-amber-500 hover:bg-amber-500/10 border-amber-500/30"
+                    >
+                      <HugeiconsIcon icon={PencilEdit02Icon} className="size-3" />
+                      Edit Draft
+                    </Button>
+                  )}
+                  {onSubmitForReview && (
+                    <Button
+                      size="xs"
+                      onClick={() => onSubmitForReview(questionId)}
+                      className="rounded-xl gap-1 text-2xs font-semibold bg-amber-600 hover:bg-amber-700 text-white shadow-xs"
+                    >
+                      <HugeiconsIcon icon={SentIcon} className="size-3" />
+                      Re-submit to Reviewer
+                    </Button>
+                  )}
                 </div>
               )}
             </div>

@@ -6,6 +6,20 @@
 
 ---
 
+## 2026-10-01
+
+### [2026-10-01] Decision: Unified Create/Edit Question Studio dialog with auto-prefilling and state recovery over dedicated separate edit page because reusing the comprehensive question authoring modal avoids code duplication, preserves inline taxonomy/markdown preview workflows, and provides instant transition between drafting and editing.
+
+- **Model**: User (Kushagra) + Antigravity (Gemini 3.8 Flash)
+- **Status**: IMPLEMENTED.
+- **Decision Made**: Extended the existing Question Studio authoring dialog to dynamically support both creation and draft editing modes based on an `editingQuestionId` state. Populates all fields (`currentDraft`, `options`, `testCases`, `starterCode`, `difficulty`, `taxonomy`) when opening an existing draft or changes-requested question, locks `questionType` to preserve schema invariants, and executes `trpc.questionBank.updateDraft` upon submission.
+- **Alternatives Considered**:
+  1. Creating a separate `/dashboard/questions/[id]/edit` page — rejected because it adds routing complexity, unnecessary page transitions, and duplicates hundreds of lines of complex input/preview state management.
+  2. In-place table cell editing — rejected because questions contain multi-paragraph markdown descriptions, complex MCQ option arrays, and multi-field test cases that require a spacious modal workspace.
+- **Concrete Reason**: Provides creators with an immediate, cohesive authoring experience with zero layout shift, instant markdown preview, and consistent test case management across both creation and revision rounds.
+
+---
+
 ## 2026-09-18
 
 ### [2026-09-18] Decision: Multi-role in-review question content editing for creators, assigned reviewers, and admins over strict creator-only draft locks because collaborative editing allows rapid typo correction and test case refinement without requiring full rejection-resubmission cycles.

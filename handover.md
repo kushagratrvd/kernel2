@@ -11,11 +11,11 @@
 
 ## 1. 5-Line Session Summary (Current Session)
 
-- What was done: Implemented Admin Universal Question Reject (`adminReject`), Recovery to Draft (`adminRestoreToDraft`), and Archive/Unarchive (`archiveQuestion`, `unarchiveQuestion`) with cancel-and-create assignment audit pattern, mandatory rejection reasons, and confirmation dialogs in Question Studio table and Detail Modal.
+- What was done: Implemented Creator Question Draft Editing flow across Question Studio table, Question Detail Modal, and Review Discussion Thread using `trpc.questionBank.updateDraft`.
 - What was committed: Pending commit.
 - Build state: Verified `pnpm exec tsc --noEmit` with 0 type errors.
-- What's left: Browser testing of reject, restore to draft, archive, and unarchive flows.
-- What to watch out for: `REJECTED` is recoverable to `DRAFT` for creator rework; `ARCHIVED` is restricted to `APPROVED` questions only and restores directly back to `APPROVED` without re-review. Existing contests remain completely unaffected because they reference immutable `questionVersion` snapshots.
+- What's left: User testing of draft editing and resubmission.
+- What to watch out for: Only questions in `DRAFT` or `CHANGES_REQUESTED` owned by the creator (or admin) can be edited. Question type is locked during edit to maintain schema integrity.
 
 ---
 
@@ -41,14 +41,20 @@
 
 ## 3. What is Currently in Progress (this always shows current session progress and is replaced not incrementally updated)
 
-- Admin Universal Question Lifecycle Controls (`adminReject`, `adminRestoreToDraft`, `archiveQuestion`, `unarchiveQuestion`) implemented across backend router, question studio table, and detail modal.
-- Explicit `ARCHIVED` and `REJECTED` badges and filter tabs added.
-- All code compiles cleanly with 0 type errors (`pnpm exec tsc --noEmit`).
-- Ready for git commit and browser testing.
+- Creator Question Draft Editing flow (`handleOpenEdit`, `updateDraftMutation`, Edit Draft buttons in Table, Detail Modal, and Feedback Banner).
+- Prefilling and state recovery for options, test cases, and taxonomy in Question Studio modal.
 
 ---
 
 ## 4. Previous Session Summaries
+
+### Session: 2026-09-18 (Admin Reject, Restore to Draft, Archive/Unarchive)
+
+- What was done: Implemented Admin Universal Question Reject (`adminReject`), Recovery to Draft (`adminRestoreToDraft`), and Archive/Unarchive (`archiveQuestion`, `unarchiveQuestion`) with cancel-and-create assignment audit pattern, mandatory rejection reasons, and confirmation dialogs in Question Studio table and Detail Modal.
+- What was committed: Pending commit.
+- Build state: Verified `pnpm exec tsc --noEmit` with 0 type errors.
+- What's left: Browser testing of reject, restore to draft, archive, and unarchive flows.
+- What to watch out for: `REJECTED` is recoverable to `DRAFT` for creator rework; `ARCHIVED` is restricted to `APPROVED` questions only and restores directly back to `APPROVED` without re-review. Existing contests remain completely unaffected because they reference immutable `questionVersion` snapshots.
 
 ### Session: 2026-09-18 (Horizontal Table Scroll Sliders)
 
