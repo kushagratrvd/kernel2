@@ -4,6 +4,621 @@
 
 ---
 
+# [EXECUTED] Implementation Plan: Student Contest Hub & Earlier Participated Contests View
+
+### Context & Goal
+Previously, `/contest` was only a minimal form with a single "Enter Contest Code" input. Students had no way to view their historical contest attempts, check their scores/ranks once contests ended, or launch post-contest Monaco solution reviews directly from a dashboard. Additionally, live contests should not be publicly browsable without an authorized invitation passcode.
+
+This plan implements:
+1. **Student Contest Hub (`src/app/contest/page.tsx`)**:
+   - Clean, modern student dashboard replacing the bare code-entry page.
+   - Header with student credentials, "Contest Hub" badge, theme toggle, and Sign Out.
+   - Hero banner with a prominent **"Enter Contest Code"** primary CTA button.
+   - Base UI **`<Dialog>` Modal**: Opens on clicking "Enter Contest Code" with an autofocus input for invitation passcodes (e.g. `KRN101`) and navigates to `/contest/[code]`.
+   - **Past Contests Grid**: Displays cards for earlier participated contests (`contestParticipation` for the user) with status badges:
+     - 🟢 **Concluded**: Shows official Score & Rank with buttons for "Scorecard" (`/results`) and "Review" (`/review`).
+     - 🟡 **Results Pending**: Shows holding status badge for submitted contests where the contest is still running (`NOW() < endTime`).
+     - 🔵 **In Progress**: Shows "In Progress" badge with a direct "Resume Attempt" CTA (`/attempt`).
+     - ⚪ **Timed Out**: Shows unfinished state.
+   - **Empty State**: Friendly card encouraging students to enter their first contest invitation code.
+2. **Backend TRPC Procedure (`getStudentPastContests` in `src/server/trpc/routers/contest.ts`)**:
+   - Queries `contestParticipation` joined with `contest` where `userId = ctx.user.id`.
+   - Uses PostgreSQL server clock (`NOW() >= contest.endTime`) to strictly time-lock scores and ranks for active contests.
+   - Returns sanitized metadata, status, scores (for concluded), and `canReview` flag.
+
+---
+
+# [EXECUTED] Implementation Plan: Post-Contest Student Submissions Review & Result Visibility System
+
+### Context & Goal
+Currently, when a student finishes a contest, they are immediately redirected to `/contest/[code]/results` where their final score, rank, and the leaderboard are displayed, regardless of whether the contest has officially ended. Furthermore, students have no way to review their submitted answers, verify correct solutions, or inspect where their code failed test cases.
+
+This plan implements:
+1. **Contest Time Lock for Results**:
+   - While the contest is still running (`NOW() < contest.endTime`), students who finish early see **only** the number of attempted questions (e.g., "Attempted 8 of 10 questions"). Scores, ranks, leaderboards, and solutions remain completely hidden to prevent answer leaks to students still competing.
+   - Once the contest ends (`NOW() >= contest.endTime`), full scores, ranks, leaderboards, and review access are unlocked and persistently accessible anytime.
+2. **Dedicated Fullscreen Review Workspace (`/contest/[code]/review`)**:
+   - Replicates the exam workspace layout:
+     - **Question Navigator**: Pills for Q1, Q2, Q3... color-coded:
+       - 🟢 Green: Correct (Full marks)
+       - 🟡 Yellow: Partially correct (e.g. 5/10 test cases passed)
+       - 🔴 Red: Incorrect (0 marks)
+       - ⚪ Gray: Unattempted / Skipped
+     - **Left Panel**: Problem description, difficulty, marks awarded vs max marks, hint.
+     - **Right Panel**:
+       - **MCQ**: All options displayed, student's chosen option tagged ("Your Answer"), correct option highlighted in green ("Correct Answer"), unattempted state clearly communicated.
+       - **Text**: Student's text shown side-by-side with the expected answer.
+       - **Coding**:
+         - Strict Final submission code displayed in read-only Monaco editor.
+         - Score comparison banner: If final attempt score != best score, displays: *"Final Attempt (Score: X/max) — Best Score Counted: Y/max"*.
+         - Test case breakdown: Sample test cases shown; hidden test cases are shown **only if the student's submission failed on that hidden test case** (revealing input, expected output, stdout/stderr); passed hidden test cases remain masked.
+         - Unattempted state: Displays starter code with *"No code was submitted for this question (0 marks awarded)"*.
+3. **Results Page Integration (`/contest/[code]/results`)**:
+   - Holding state when `isEnded === false`.
+   - Prominent **"Review My Submissions"** button when `isEnded === true`.
+
+---
+
+## Architecture & Implementation Steps
+
+### Step 1: Backend TRPC Router Updates (`src/server/trpc/routers/contest.ts`)
+
+1. **Update `getResults` query**:
+   - Calculate `isEnded = new Date() >= new Date(foundContest.endTime)`.
+   - Calculate `attemptedCount` = unique `contestQuestionId`s present in `submission` for this participant.
+   - If `!isEnded`:
+     - Return `{ contest: foundContest, isEnded: false, attemptedCount, totalQuestions: foundContest.totalQuestions, participation: { id: participation.id, finishedAt: participation.finishedAt }, leaderboard: [] }`.
+     - Ensures zero score/rank leakage in client DevTools or network payloads.
+   - If `isEnded`:
+     - Return `{ contest: foundContest, isEnded: true, attemptedCount, totalQuestions: foundContest.totalQuestions, participation, leaderboard }`.
+
+2. **Add `getStudentReview` query (`protectedProcedure`)**:
+   - Input: `{ contestId: string }`.
+   - Guard checks:
+     - Verify contest exists.
+     - Verify participant exists and `finishedAt !== null`.
+     - Verify contest has ended: `new Date() >= new Date(foundContest.endTime)`. If not ended, throw `FORBIDDEN` ("Solutions and review will be available after the contest ends at [endTime]").
+   - Fetch all `contestQuestion`s ordered by `questionOrder`, including `question` and `version`.
+   - Fetch all `submission`s for this student in this contest ordered by `createdAt ASC`.
+   - For each question:
+     - Compute `bestScore = Math.max(...cqSubs.map(s => s.scoreObtained), 0)`.
+     - Get `finalSubmission = cqSubs[cqSubs.length - 1] ?? null`.
+     - Determine status:
+       - No submissions: `"unattempted"`
+       - `bestScore === marks`: `"correct"`
+       - `bestScore > 0`: `"partial"`
+       - `bestScore === 0`: `"incorrect"`
+     - Format payload according to question type:
+       - **MCQ**: options array, `correctOptionId`, `studentAnswer`, `isCorrect`.
+       - **Text**: `expectedAnswer`, `studentAnswer`, `isCorrect`.
+       - **Code**: `starterCode`, `allowedLanguages`, `timeLimit`, `memoryLimit`, `finalCode`, `languageId`, `finalScore`, `bestScore`, `executionStatus`.
+       - Test Cases:
+         - Sample test cases: full details (`input`, `expectedOutput`, `stdout`, `stderr`, `passed`).
+         - Hidden test cases: if `passed === false`, reveal details (`input`, `expectedOutput`, `stdout`, `stderr`, `passed: false`); if `passed === true`, return only `{ isSample: false, passed: true }`.
+
+---
+
+### Step 2: Results Page Update (`src/app/contest/[code]/results/page.tsx`)
+
+1. Support holding state when `results.isEnded === false`:
+   - Replace score and rank cards with:
+     - "Contest Completed — Results Pending"
+     - "Questions Attempted: {attemptedCount} / {totalQuestions}"
+     - Banner: "Contest is still in progress. Official scores, rankings, and solution reviews will be published once the contest concludes at {formattedEndTime}."
+     - Hide leaderboard.
+2. When `results.isEnded === true`:
+   - Keep congratulations card with Score, Rank, and Finish time.
+   - Add **"Review My Submissions"** button with icon linking to `/contest/[code]/review`.
+   - Render leaderboard.
+
+---
+
+### Step 3: Fullscreen Review Workspace (`src/app/contest/[code]/review/page.tsx`)
+
+1. Build responsive fullscreen layout modeled after `/contest/[code]/attempt/page.tsx`:
+   - **Header**:
+     - "Back to Results" button (`/contest/[code]/results`).
+     - Contest title with "Review Mode" badge.
+     - Final score summary badge: `Score: {score} / {totalScore}`.
+     - Dark/Light mode toggle.
+   - **Top Question Navigator**:
+     - Pill buttons for Q1..Qn.
+     - Badges with icons:
+       - 🟢 Green: Correct
+       - 🟡 Yellow: Partial
+       - 🔴 Red: Incorrect
+       - ⚪ Gray: Unattempted
+   - **Two-Column Resizable Body**:
+     - **Left Column**:
+       - Question order, type, and difficulty badges.
+       - Marks awarded badge: `Awarded: {awardedMarks} / {marks} pts`.
+       - Markdown description of problem.
+       - Expandable Hint (if present).
+     - **Right Column**:
+       - **MCQ Review**:
+         - List of options.
+         - Selected option tagged with "Your Answer".
+         - Correct option highlighted in green with "Correct Answer" badge.
+         - Unattempted banner if skipped.
+       - **Text Review**:
+         - Student's submitted text vs Expected answer.
+       - **Coding Review**:
+         - Discrepancy Banner: If `finalScore !== bestScore`, displays: *"Final Attempt Score: {finalScore}/{marks} — Best Score Counted: {bestScore}/{marks}"*.
+         - Language and execution time/memory metadata.
+         - Read-only Monaco code viewer.
+         - Test cases diagnostic accordion:
+           - Sample test cases.
+           - Failed hidden test cases with input, expected, and stdout/stderr.
+           - Passed hidden test cases with "Passed (Private Test Case)" badge.
+         - If unattempted: displays starter code with notice *"No code was submitted for this question"*.
+   - **Footer Navigation**:
+     - "Previous Question" and "Next Question" buttons.
+
+---
+
+### Step 4: Verification & Test Checklist
+- Run `pnpm exec tsc --noEmit` and confirm 0 type errors.
+- Test active contest holding state (`isEnded === false`) -> confirm scores/ranks/leaderboard/solutions are hidden.
+- Test completed contest state (`isEnded === true`) -> confirm scores, rank, and "Review My Submissions" button.
+- Test MCQ, Text, and Code reviews across Correct, Partial, Incorrect, and Unattempted states.
+- Verify hidden test case masking: failed hidden cases show diagnostics; passed hidden cases stay masked.
+- Verify Best Score vs Final Attempt note when final attempt scored less than best attempt.
+
+---
+
+# [EXECUTED] Implementation Plan: Admin Code Submissions Live Monitoring & Student Inspection System
+
+### Context & Need
+Admins currently have no visibility into student code submissions during or after contests. There is no page to see what students are submitting, whether code is passing or failing, or to inspect individual student attempts. The existing admin contest pages only handle CRUD for contest settings and questions.
+
+This plan adds:
+1. A **global live submissions feed** at `/dashboard/contests/submissions` showing real-time coding submissions across all contests, with contest/status/student filters.
+2. A **per-contest submissions tab** inside the existing `/dashboard/contests/[id]` page.
+3. A **per-student inspection drawer** showing all coding attempts for a student in a contest, with Monaco code viewer and full test case diagnostic logs for failed cases.
+
+### Design Decisions (from review)
+- **Scoring**: Best score (`Math.max`) — no penalty. Already implemented in `finishAttempt`. No changes.
+- **Live feed scope**: Code submissions only (not MCQ/text). Filter by `languageId IS NOT NULL`.
+- **Diagnostic storage**: Full test case data (input, expected, stdout, stderr) stored in DB for admin inspection. Student response continues to be redacted for private test cases.
+- **Direct `contestId` column on `submission`**: Denormalize `contestId` onto the `submission` table with an index on `(contestId, createdAt DESC)`. Eliminates repeated cross-table joins and powers fast filtering.
+- **Bi-directional Cursor Live Polling**:
+  - **Live streaming**: Polls `WHERE createdAt > :afterCursor` (only fetching submissions created after the newest seen timestamp) and prepends them seamlessly to the top of the feed. Guaranteed zero missed submissions and zero layout jumps.
+  - **Historical scrolling**: Fetches `WHERE createdAt < :beforeCursor` when user clicks "Load More" to append older entries.
+- **Drawer design**: Per-student (not per-problem). Shows all coding questions and all attempts for the selected student in the contest.
+
+### Constraints & Migration Check
+- Schema addition: Add `contestId` to `submission` table in `src/server/db/contest-schema.ts` and backfill existing DB records using `contest_participation.contest_id`.
+- SQL Migration provided below to cleanly backfill both the live database and legacy CSV imports (`submission.csv`).
+- ✅ All new endpoints use `adminProcedure` — respects Contest Access Restriction constraint.
+- ✅ Student contest runner mechanics (`/contest/[code]`) are not modified — only writes `contestId` on submit and enriches diagnostic log storage.
+- ✅ Full type check verified.
+
+---
+
+## Step 0: Database Migration — Add & Backfill `contest_id` on `submission`
+
+### 1. Drizzle Schema Update: `src/server/db/contest-schema.ts`
+```ts
+export const submission = pgTable("submission", {
+  id: text("id").primaryKey(),
+  contestId: text("contest_id")
+    .notNull()
+    .references(() => contest.id, { onDelete: "cascade" }),
+  contestParticipationId: text("contest_participation_id")
+    .notNull()
+    .references(() => contestParticipation.id, { onDelete: "cascade" }),
+  contestQuestionId: text("contest_question_id")
+    .notNull()
+    .references(() => contestQuestion.id, { onDelete: "cascade" }),
+  questionId: text("question_id")
+    .notNull()
+    .references(() => question.id),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  userAnswer: text("user_answer").notNull(),
+  languageId: integer("language_id"),
+  status: text("status").notNull(),
+  scoreObtained: integer("score_obtained").default(0).notNull(),
+  executionResult: jsonb("execution_result"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("submission_contest_id_idx").on(table.contestId),
+  index("submission_contest_created_at_idx").on(table.contestId, table.createdAt),
+  index("submission_participation_idx").on(table.contestParticipationId),
+  index("submission_contest_question_idx").on(table.contestQuestionId),
+  index("submission_question_idx").on(table.questionId),
+  index("submission_user_idx").on(table.userId),
+]);
+```
+
+### 2. SQL Migration Query for Live Database (or for importing `submission.csv`)
+
+```sql
+-- ============================================================================
+-- Step A: Add contest_id column as nullable
+-- ============================================================================
+ALTER TABLE "submission" 
+ADD COLUMN IF NOT EXISTS "contest_id" text REFERENCES "contest"("id") ON DELETE CASCADE;
+
+-- ============================================================================
+-- Step B: Backfill contest_id from contest_participation
+-- ============================================================================
+UPDATE "submission" s
+SET "contest_id" = cp."contest_id"
+FROM "contest_participation" cp
+WHERE s."contest_participation_id" = cp."id"
+  AND s."contest_id" IS NULL;
+
+-- ============================================================================
+-- Step C: Fallback backfill from contest_question (for any edge-case orphaned links)
+-- ============================================================================
+UPDATE "submission" s
+SET "contest_id" = cq."contest_id"
+FROM "contest_question" cq
+WHERE s."contest_question_id" = cq."id"
+  AND s."contest_id" IS NULL;
+
+-- ============================================================================
+-- Step D: Enforce NOT NULL and create high-speed indexes for live polling
+-- ============================================================================
+ALTER TABLE "submission" ALTER COLUMN "contest_id" SET NOT NULL;
+
+CREATE INDEX IF NOT EXISTS "submission_contest_id_idx" 
+ON "submission" ("contest_id");
+
+CREATE INDEX IF NOT EXISTS "submission_contest_created_at_idx" 
+ON "submission" ("contest_id", "created_at" DESC);
+
+CREATE INDEX IF NOT EXISTS "submission_code_created_at_idx" 
+ON "submission" ("created_at" DESC) 
+WHERE "language_id" IS NOT NULL;
+```
+
+---
+
+## Step 1: Backend — Enrich `submitCode` & Insert `contestId`
+
+### [MODIFY] `src/server/trpc/routers/contest.ts` — `submitCode` and `submitMcqOrTextAnswer`
+
+- When inserting into `submission`, include `contestId: input.contestId`.
+- Store the **full** diagnostic data in the `executionResult` JSONB column (input, expectedOutput, stdout, stderr, compile_output, time, memory, status, passed, isSample) for every test case.
+- **Redact the response** returned to the student: map over `executionResult.details` before the `return` statement to strip `input`, `expectedOutput`, `stdout`, and `stderr` for non-sample test cases.
+
+---
+
+## Step 2: Backend — Cursor-Based Admin Query Endpoints
+
+### [MODIFY] `src/server/trpc/routers/contest.ts` — Add 3 new `adminProcedure` endpoints
+
+#### 2a. `adminGetSubmissions` — Cursor-Based Live Feed
+
+```ts
+adminGetSubmissions: adminProcedure
+  .input(z.object({
+    contestId: z.string().optional(),
+    userId: z.string().optional(),
+    status: z.string().optional(),       // "Accepted", "Wrong Answer", etc.
+    afterCursor: z.coerce.date().optional(),  // LIVE POLL: fetches new rows created AFTER this timestamp
+    beforeCursor: z.coerce.date().optional(), // LOAD MORE: fetches older rows created BEFORE this timestamp
+    limit: z.number().min(1).max(100).default(50),
+  }))
+  .query(async ({ ctx, input }) => {
+    // Queries submission directly on contestId without multi-table join
+    // Filters submission.languageId IS NOT NULL (coding submissions only)
+    // If afterCursor is provided: returns new arrivals ordered ASC or DESC to prepend
+    // If beforeCursor is provided: returns historical page ordered DESC
+  })
+```
+
+**Query Advantages with `contestId` + Cursor**:
+- Direct query on `submission` using index `submission_contest_created_at_idx` or `submission_code_created_at_idx`.
+- Live polling query is ultra-lean: `WHERE contest_id = ? AND language_id IS NOT NULL AND created_at > :afterCursor ORDER BY created_at DESC`. Returns only new submissions (often empty array or 1-2 items) costing virtually zero database IO!
+- No missed submissions if multiple students submit within the same second.
+
+#### 2b. `adminGetStudentSubmissions` — Full student inspection data
+#### 2c. `adminGetContestParticipants` — Participants list for a contest
+```
+
+**Implementation approach**: Use Drizzle's explicit `db.select().from(submission).innerJoin(...)` API (NOT the relational `db.query` API) because:
+- The `submission` table has no direct `contestId` column. Must join through `contestParticipation` to reach `contest`.
+- Need to join `user` for student name/email.
+- Need to join `contestQuestion → question` for question title and type.
+- Must filter `submission.languageId IS NOT NULL` to exclude MCQ/text submissions.
+
+**Joins**:
+```
+submission
+  INNER JOIN user ON submission.userId = user.id
+  INNER JOIN contestParticipation ON submission.contestParticipationId = contestParticipation.id
+  INNER JOIN contest ON contestParticipation.contestId = contest.id
+  INNER JOIN contestQuestion ON submission.contestQuestionId = contestQuestion.id
+  INNER JOIN question ON submission.questionId = question.id
+```
+
+**WHERE clauses** (conditional):
+- Always: `submission.languageId IS NOT NULL` (code-only)
+- If `contestId`: `contestParticipation.contestId = input.contestId`
+- If `userId`: `submission.userId = input.userId`
+- If `status`: `submission.status = input.status`
+
+**ORDER BY**: `submission.createdAt DESC`
+**LIMIT/OFFSET**: `input.limit`, `input.offset`
+
+**Returns**: Array of objects:
+```ts
+{
+  id: string,
+  createdAt: Date,
+  status: string,
+  scoreObtained: number,
+  languageId: number,
+  // Student info
+  student: { id, name, email },
+  // Contest info
+  contest: { id, title, code },
+  // Question info
+  question: { id, title, questionType },
+  // Contest question info
+  contestQuestion: { marks, questionOrder },
+}
+```
+
+Note: Does NOT return `userAnswer` (source code) or `executionResult` (diagnostic logs) — those are fetched only when the admin opens the student drawer, to keep the feed response lightweight.
+
+#### 2b. `adminGetStudentSubmissions` — Full student inspection data
+
+```ts
+adminGetStudentSubmissions: adminProcedure
+  .input(z.object({
+    contestId: z.string(),
+    userId: z.string(),
+  }))
+  .query(...)
+```
+
+**Returns**:
+```ts
+{
+  // Student metadata
+  student: { id, name, email },
+  // Participation record
+  participation: { id, joinedAt, startedAt, finishedAt, score, rank },
+  // Contest metadata
+  contest: { id, title, code, totalScore },
+  // All coding questions in this contest (filtered to questionType = 'code')
+  codingQuestions: [{
+    contestQuestionId: string,
+    questionOrder: number,
+    marks: number,
+    title: string,
+    bestScore: number,       // Math.max of all attempts for this question
+    attemptCount: number,    // total submission count
+  }],
+  // All code submissions for this student in this contest, ordered by createdAt ASC
+  submissions: [{
+    id, createdAt, status, scoreObtained, languageId,
+    contestQuestionId,       // to group by question in the drawer
+    userAnswer: string,      // full source code (for Monaco viewer)
+    executionResult: object, // full diagnostic JSON (for test case inspection)
+  }],
+}
+```
+
+**Implementation approach**: Use Drizzle relational queries (`db.query.contestParticipation.findFirst({ with: { ... } })`). This endpoint fetches a single student's data, so nested `with` is clean here.
+
+**Filtering coding questions**: Join `contestQuestion → question` and filter `question.questionType = 'code'`.
+
+#### 2c. `adminGetContestParticipants` — Participants list for a contest
+
+```ts
+adminGetContestParticipants: adminProcedure
+  .input(z.object({ contestId: z.string() }))
+  .query(...)
+```
+
+**Returns**: Array of:
+```ts
+{
+  userId: string,
+  name: string,
+  email: string,
+  joinedAt: Date,
+  startedAt: Date | null,
+  finishedAt: Date | null,
+  score: number,
+  rank: number | null,
+  codeSubmissionCount: number,  // count of code submissions (languageId IS NOT NULL)
+}
+```
+
+This powers the "Participants" tab in the contest detail page, where clicking a student opens the drawer.
+
+---
+
+## Step 3: Frontend — Global Live Submissions Feed Page
+
+### [CREATE] `src/app/dashboard/contests/submissions/page.tsx`
+
+**Route**: `/dashboard/contests/submissions`
+**Admin guard**: Inherits from existing `ContestsAdminLayout` at `/dashboard/contests/layout.tsx` — no additional guard needed.
+
+**Layout**:
+- **Header bar**: Title "Live Code Submissions", Back button to `/dashboard`.
+- **Controls row**:
+  - **Live toggle**: Switch that enables `refetchInterval: 4000` on the TanStack Query. When off, manual refresh button. Visual indicator (pulsing green dot) when live.
+  - **Contest filter**: `<Select>` dropdown populated from `trpc.contest.listAll`. "All Contests" default.
+  - **Status filter**: `<Select>` with options: All, Accepted, Wrong Answer, Time Limit Exceeded, Runtime Error, Compilation Error.
+  - **Student search**: Text input that debounces and searches by name/email (frontend filtering on the fetched batch, or a server-side `userId` filter if a student is selected from a suggestion dropdown).
+- **Table**: Horizontal-scrollable table with columns:
+  | Column | Content |
+  |--------|---------|
+  | Time | Relative timestamp (`2s ago`, `1m ago`) using `date-fns formatDistanceToNow` |
+  | Student | Name + email (truncated) |
+  | Contest | Contest title (hidden if contest filter is active) |
+  | Problem | `#order: title` (e.g. `#2: Container With Most Water`) |
+  | Language | Language name badge (Python, Node, C++, Java, C) mapped from `languageId` |
+  | Status | Color-coded badge: Green=Accepted, Red=Wrong Answer, Orange=TLE, Yellow=CE, Gray=RE |
+  | Score | `scoreObtained / marks` |
+  | Action | "Inspect" button → opens `<StudentSubmissionsDrawer />` |
+
+- **Pagination**: "Load More" button at the bottom. Increments `offset` by `limit`.
+- **Empty state**: "No code submissions yet" with appropriate icon.
+
+**Data source**: `trpc.contest.adminGetSubmissions` with reactive filters.
+
+---
+
+## Step 4: Frontend — Contest Detail Page Tabs
+
+### [MODIFY] `src/app/dashboard/contests/[id]/page.tsx`
+
+**Current state**: Single-view page with contest summary box, metadata grid, and questions list.
+
+**Change**: Add a tab bar below the contest summary box with 3 tabs:
+
+1. **Questions & Settings** (default) — Current content (questions list, edit/add buttons).
+2. **Submissions Feed** — Embeds the same submissions table component from Step 3, pre-filtered to `contestId`. Live toggle enabled by default.
+3. **Participants** — Table of all students who joined, powered by `adminGetContestParticipants`:
+   | Column | Content |
+   |--------|---------|
+   | Student | Name + email |
+   | Joined | Timestamp |
+   | Started | Timestamp or "Not started" |
+   | Status | "In Progress" / "Finished" / "Not started" badge |
+   | Code Submissions | Count |
+   | Score | Final score (or "—" if not finished) |
+   | Rank | Rank number (or "—") |
+   | Action | "View Submissions" → opens `<StudentSubmissionsDrawer />` |
+
+**Tab implementation**: Use a simple `useState<"questions" | "submissions" | "participants">` with conditional rendering. No URL-based tabs needed (keeps it simple).
+
+---
+
+## Step 5: Frontend — Student Submissions Drawer
+
+### [CREATE] `src/components/contests/student-submissions-drawer.tsx`
+
+**Trigger**: Opened from either the global submissions feed or the contest participants table. Receives `contestId` and `userId` as props.
+
+**Component**: Uses shadcn `<Sheet>` (side drawer) opening from the right, sized `sm:max-w-2xl`.
+
+**Data source**: `trpc.contest.adminGetStudentSubmissions({ contestId, userId })`
+
+**Layout**:
+
+```
+┌─────────────────────────────────────────────┐
+│ Student: John Doe (john@example.com)        │
+│ Status: In Progress | Score: 140/200        │
+├─────────────────────────────────────────────┤
+│ [#1: Two Sum ✅ 100/100] [#3: MaxWater 🔴 40/100] │  ← Problem pills (code only)
+├─────────────────────────────────────────────┤
+│ Attempts for #3: Container With Most Water  │
+│                                             │
+│ ┌─ Attempt #3 — 9:14 PM ───────────────┐   │
+│ │ Status: Wrong Answer (3/5 passed)     │   │
+│ │ Language: Python 3.8 | Time: 0.04s    │   │
+│ │ [▼ View Code] [▼ Test Results]        │   │
+│ └───────────────────────────────────────┘   │
+│ ┌─ Attempt #2 — 9:11 PM ───────────────┐   │
+│ │ Status: Compilation Error             │   │
+│ │ ...                                   │   │
+│ └───────────────────────────────────────┘   │
+│ ┌─ Attempt #1 — 9:08 PM ───────────────┐   │
+│ │ Status: Accepted (5/5 passed)         │   │
+│ │ ...                                   │   │
+│ └───────────────────────────────────────┘   │
+└─────────────────────────────────────────────┘
+```
+
+**Sections**:
+
+1. **Header**: Student name, email, participation status (In Progress / Finished), total best score across all coding questions.
+
+2. **Problem Pill Selector**: Horizontal row of pill buttons, one per coding question (filtered to `questionType = 'code'`). Each pill shows:
+   - `#order: title (truncated)`
+   - Best score badge (green if full marks, red/orange otherwise)
+   - Attempt count
+   - Active pill is highlighted.
+
+3. **Attempts List** (for selected problem): Reverse-chronological list of all submissions for that `contestQuestionId`. Each attempt is a collapsible card:
+   - **Header row**: Attempt number, timestamp (formatted), status badge, language badge, execution time, memory.
+   - **Expandable "View Code"**: Monaco Editor (`@monaco-editor/react`) in read-only mode, dark theme, language set from `languageId`. Shows `submission.userAnswer`.
+   - **Expandable "Test Results"**: Iterates over `executionResult.details`:
+     - **Passed test cases**: Green row with `✓ Test Case #N: Passed (0.02s, 14MB)`. No expandable detail.
+     - **Failed test cases**: Red row, expandable to show:
+       - **Input** (`stdin`): Monospace pre block.
+       - **Expected Output**: Monospace pre block.
+       - **Student Output** (`stdout`): Monospace pre block, highlighted if different from expected.
+       - **Stderr / Compile Output**: If present, shown in red monospace block.
+
+---
+
+## Step 6: Frontend — Dashboard Navigation Link
+
+### [MODIFY] `src/app/dashboard/page.tsx`
+
+**Change**: Add a navigation link in the admin section of the dashboard nav bar and a quick-access card.
+
+- In the top nav bar (inside the `{isAdmin && ...}` block, after "Users & Roles"):
+  ```tsx
+  <Link href="/dashboard/contests/submissions" className="...">
+    Code Submissions
+  </Link>
+  ```
+
+- In the admin quick actions section, add a card/button:
+  ```
+  "View Live Submissions" → navigates to /dashboard/contests/submissions
+  ```
+
+---
+
+## Step 7: Shared Utilities
+
+### [CREATE] `src/lib/language-map.ts`
+
+Small utility to map `languageId` numbers to display names, used by both the global feed and the drawer:
+
+```ts
+export const LANGUAGE_MAP: Record<number, { name: string; monacoKey: string }> = {
+  71: { name: "Python 3.8", monacoKey: "python" },
+  63: { name: "Node.js 18", monacoKey: "javascript" },
+  54: { name: "C++ (GCC 9)", monacoKey: "cpp" },
+  50: { name: "C (GCC 9)", monacoKey: "c" },
+  62: { name: "Java 17", monacoKey: "java" },
+};
+```
+
+This deduplicates the language ID → name mapping that currently lives only in `src/server/codebox.ts` (server-side) and `src/app/contest/[code]/attempt/page.tsx` (client-side).
+
+---
+
+## Files Summary
+
+| Action | File | Description |
+|--------|------|-------------|
+| MODIFY | `src/server/trpc/routers/contest.ts` | Enrich `submitCode` diagnostic data + add 3 admin endpoints |
+| CREATE | `src/app/dashboard/contests/submissions/page.tsx` | Global live submissions feed page |
+| MODIFY | `src/app/dashboard/contests/[id]/page.tsx` | Add Submissions Feed + Participants tabs |
+| CREATE | `src/components/contests/student-submissions-drawer.tsx` | Per-student inspection side drawer |
+| MODIFY | `src/app/dashboard/page.tsx` | Add "Code Submissions" nav link for admins |
+| CREATE | `src/lib/language-map.ts` | Shared language ID → name/monaco mapping |
+
+**No new dependencies.** No schema migration. No changes to student-facing contest runner.
+
+---
+
+## Verification Checklist
+
+1. `pnpm exec tsc --noEmit` — 0 type errors.
+2. Submit code as a student (Python, JS, C++, Java) → verify student still sees redacted test case output (no hidden inputs/expected outputs in browser DevTools network tab).
+3. Open `/dashboard/contests/submissions` as admin → verify submissions appear, live toggle works, filters work.
+4. Open a contest detail page → verify new tabs render, submissions tab is pre-filtered.
+5. Click "Inspect" on a submission → verify drawer opens with correct student, problems load, attempts display, Monaco renders code, failed test cases show full diagnostic diff.
+6. Verify non-admin users cannot access `/dashboard/contests/submissions` (redirected by `ContestsAdminLayout`).
+
+---
+
 # [EXECUTED] Implementation Plan: Creator Draft Editing Flow in Question Studio & Detail Modal
 
 ### Context & Need

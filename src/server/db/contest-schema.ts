@@ -76,6 +76,9 @@ export const contestParticipation = pgTable("contest_participation", {
 
 export const submission = pgTable("submission", {
   id: text("id").primaryKey(),
+  contestId: text("contest_id")
+    .notNull()
+    .references(() => contest.id, { onDelete: "cascade" }),
   contestParticipationId: text("contest_participation_id")
     .notNull()
     .references(() => contestParticipation.id, { onDelete: "cascade" }),
@@ -95,6 +98,8 @@ export const submission = pgTable("submission", {
   executionResult: jsonb("execution_result"), // detailed JSON report of execution
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
+  index("submission_contest_id_idx").on(table.contestId),
+  index("submission_contest_created_at_idx").on(table.contestId, table.createdAt),
   index("submission_participation_idx").on(table.contestParticipationId),
   index("submission_contest_question_idx").on(table.contestQuestionId),
   index("submission_question_idx").on(table.questionId),
@@ -110,6 +115,7 @@ export const contestRelations = relations(contest, ({ one, many }) => ({
   }),
   participations: many(contestParticipation),
   contestQuestions: many(contestQuestion),
+  submissions: many(submission),
 }));
 
 export const contestQuestionRelations = relations(contestQuestion, ({ one, many }) => ({
@@ -141,6 +147,10 @@ export const contestParticipationRelations = relations(contestParticipation, ({ 
 }));
 
 export const submissionRelations = relations(submission, ({ one }) => ({
+  contest: one(contest, {
+    fields: [submission.contestId],
+    references: [contest.id],
+  }),
   participation: one(contestParticipation, {
     fields: [submission.contestParticipationId],
     references: [contestParticipation.id],

@@ -16,8 +16,9 @@
                                                                     (/dashboard/admin/users)
 
                                       [ STUDENT ROLE ]
-                                      • Contest Code Entry (/contest)
-                                      • Live Exam Workspace (/contest/[code])
+                                      • Student Contest Hub & History (/contest)
+                                      • Live Exam Workspace (/contest/[code]/attempt)
+                                      • Post-Contest Review Workspace (/contest/[code]/review)
 
 ====================================================================================================
                                    API & MIDDLEWARE LAYER (tRPC)
@@ -31,7 +32,10 @@
       │ • startReview             │ • runCode (Codebox test)  │ • add/removeQuestion(Admin│
       │ • completeReview          │ • listKeys / addKey       │ • getByCode / join(Student│
       │ • getReviewThread         │                           │ • submitCode / finish     │
-      │ • addComment              │                           │                           │
+      │ • addComment              │                           │ • getResults / getReview  │
+      │ • adminReject / Restore   │                           │ • adminGetSubmissions     │
+      │ • archive / unarchive     │                           │ • adminGetStudentSubs     │
+      │ • getReviewThread         │                           │ • adminGetParticipants    │
       │ [creatorOrReviewerProc]   │ [creatorProcedure]        │ [adminProcedure / protProc│
       └─────────────┬─────────────┴─────────────┬─────────────┴─────────────┬─────────────┘
                     │                           │                           │

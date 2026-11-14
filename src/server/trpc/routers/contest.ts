@@ -1,16 +1,31 @@
 import { createTRPCRouter, protectedProcedure, adminProcedure } from "../init";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { eq, and, ne, or, asc, desc } from "drizzle-orm";
+import { eq, and, ne, or, asc, desc, gt, lt, isNotNull, sql } from "drizzle-orm";
 import { contest, contestQuestion, contestParticipation, submission } from "@/server/db/contest-schema";
+import { user } from "@/server/db/auth-schema";
 import { question, questionVersion } from "@/server/db/question-bank-schema";
 import { auditLog } from "@/server/db/audit-schema";
 import { executeSubmission, checkOutputsMatch } from "@/server/codebox";
 
-// ─── Type helpers ─────────────────────────────────────────────────────────────
+// ─── Type helpers & Authoritative DB Clock ───────────────────────────────────
 
 type TestCase = { input: string; expectedOutput: string; isSample: boolean };
 type MCQOption = { id: string; text: string };
+
+/**
+ * Authoritative check using PostgreSQL server time (NOW()) to prevent
+ * client or application server clock skew from unlocking results prematurely.
+ */
+async function isContestEndedDb(db: any, contestId: string): Promise<boolean> {
+  const [row] = await db
+    .select({
+      isEnded: sql<boolean>`NOW() >= ${contest.endTime}`,
+    })
+    .from(contest)
+    .where(eq(contest.id, contestId));
+  return Boolean(row?.isEnded);
+}
 
 function getVersionContent(version: typeof questionVersion.$inferSelect) {
   return {
@@ -101,7 +116,29 @@ export const contestRouter = createTRPCRouter({
         with: { submissions: true },
       });
 
-      // Shape questions for student view — only sample test cases exposed
+      // Sanitize participation to avoid MCQ score/correctness leaks during active contest
+      const sanitizedParticipation = participation
+        ? {
+            id: participation.id,
+            contestId: participation.contestId,
+            userId: participation.userId,
+            joinedAt: participation.joinedAt,
+            startedAt: participation.startedAt,
+            finishedAt: participation.finishedAt,
+            submissions: (participation.submissions || []).map((sub) => ({
+              id: sub.id,
+              questionId: sub.questionId,
+              contestQuestionId: sub.contestQuestionId,
+              userAnswer: sub.userAnswer,
+              languageId: sub.languageId,
+              // Code questions show compile/run status (e.g. Accepted); MCQ answers are masked as "Submitted"
+              status: sub.languageId ? sub.status : "Submitted",
+              scoreObtained: sub.languageId ? sub.scoreObtained : 0,
+            })),
+          }
+        : null;
+
+      // Shape questions for student view — only sample test cases exposed, correctOptionId NEVER leaked
       const questions = foundContest.contestQuestions.map((cq) => {
         const content = getVersionContent(cq.version);
         const sampleTestCases = (content.testCases ?? []).filter((tc) => tc.isSample);
@@ -122,7 +159,6 @@ export const contestRouter = createTRPCRouter({
           description: content.description,
           options: optionsList,
           structuredOptions: content.options,
-          correctOption: content.correctOptionId,
           hint: content.hint,
           starterCode: content.starterCode,
           allowedLanguages: content.allowedLanguages,
@@ -149,7 +185,7 @@ export const contestRouter = createTRPCRouter({
           questions,
         },
         questions,
-        participation,
+        participation: sanitizedParticipation,
       };
     }),
 
@@ -204,6 +240,15 @@ export const contestRouter = createTRPCRouter({
         throw new TRPCError({ code: "BAD_REQUEST", message: "You must join the contest first." });
       }
 
+      // Guard: Cannot start attempt if contest has already ended
+      const isEnded = await isContestEndedDb(ctx.db, input.contestId);
+      if (isEnded) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "This contest has already ended. New attempts cannot be started.",
+        });
+      }
+
       if (participation.startedAt) return participation;
 
       const [updated] = await ctx.db
@@ -233,6 +278,15 @@ export const contestRouter = createTRPCRouter({
 
       if (!participation || participation.finishedAt) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Attempt is not active." });
+      }
+
+      // Guard: Cannot submit answers once contest has ended
+      const isEnded = await isContestEndedDb(ctx.db, input.contestId);
+      if (isEnded) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "The contest has ended. Submissions are no longer accepted.",
+        });
       }
 
       const cq = await resolveContestQuestion(
@@ -284,13 +338,15 @@ export const contestRouter = createTRPCRouter({
           .set({ userAnswer: input.userAnswer, status, scoreObtained, createdAt: new Date() })
           .where(eq(submission.id, existing.id))
           .returning();
-        return updated;
+        // Return sanitized payload to prevent students from brute-forcing correct answers during live contests
+        return { success: true, id: updated.id, contestQuestionId: cq.id, savedAt: new Date() };
       }
 
       const [newSub] = await ctx.db
         .insert(submission)
         .values({
           id: crypto.randomUUID(),
+          contestId: input.contestId,
           contestParticipationId: participation.id,
           contestQuestionId: cq.id,
           questionId: cq.question.id,
@@ -300,7 +356,8 @@ export const contestRouter = createTRPCRouter({
           scoreObtained,
         })
         .returning();
-      return newSub;
+      // Return sanitized payload to prevent students from brute-forcing correct answers during live contests
+      return { success: true, id: newSub.id, contestQuestionId: cq.id, savedAt: new Date() };
     }),
 
   // Run code against sample test cases (not graded)
@@ -322,6 +379,15 @@ export const contestRouter = createTRPCRouter({
 
       if (!participation || participation.finishedAt) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Attempt is not active." });
+      }
+
+      // Guard: Cannot submit answers once contest has ended
+      const isEnded = await isContestEndedDb(ctx.db, input.contestId);
+      if (isEnded) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "The contest has ended. Submissions are no longer accepted.",
+        });
       }
 
       const cq = await resolveContestQuestion(
@@ -385,6 +451,15 @@ export const contestRouter = createTRPCRouter({
         throw new TRPCError({ code: "FORBIDDEN", message: "Attempt is not active." });
       }
 
+      // Guard: Cannot submit answers once contest has ended
+      const isEnded = await isContestEndedDb(ctx.db, input.contestId);
+      if (isEnded) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "The contest has ended. Submissions are no longer accepted.",
+        });
+      }
+
       const cq = await resolveContestQuestion(
         ctx.db,
         input.contestId,
@@ -443,10 +518,29 @@ export const contestRouter = createTRPCRouter({
 
       const scoreObtained = Math.round((passedCount / allTestCases.length) * cq.marks);
 
+      // Full execution diagnostics stored in database for Admin inspection
+      const fullExecutionResult = {
+        passedCount,
+        totalCount: allTestCases.length,
+        details: results.map((r) => ({
+          passed: r.passed,
+          time: r.time,
+          memory: r.memory,
+          status: r.status,
+          isSample: r.isSample,
+          input: r.input,
+          expectedOutput: r.expectedOutput,
+          stdout: r.stdout,
+          stderr: r.stderr,
+          compile_output: r.compile_output,
+        })),
+      };
+
       const [newSubmission] = await ctx.db
         .insert(submission)
         .values({
           id: crypto.randomUUID(),
+          contestId: input.contestId,
           contestParticipationId: participation.id,
           contestQuestionId: cq.id,
           questionId: cq.question.id,
@@ -455,24 +549,32 @@ export const contestRouter = createTRPCRouter({
           languageId: input.languageId,
           status: finalStatus,
           scoreObtained,
-          executionResult: {
-            passedCount,
-            totalCount: allTestCases.length,
-            details: results.map((r) => ({
-              passed: r.passed,
-              time: r.time,
-              memory: r.memory,
-              status: r.status,
-              isSample: r.isSample,
-              stdout: r.isSample ? r.stdout : null,
-              stderr: r.isSample ? r.stderr : null,
-              compile_output: r.compile_output,
-            })),
-          },
+          executionResult: fullExecutionResult,
         })
         .returning();
 
-      return newSubmission;
+      // Redact private/hidden test case outputs in response sent back to student
+      const sanitizedExecutionResult = {
+        passedCount,
+        totalCount: allTestCases.length,
+        details: results.map((r) => ({
+          passed: r.passed,
+          time: r.time,
+          memory: r.memory,
+          status: r.status,
+          isSample: r.isSample,
+          input: r.isSample ? r.input : undefined,
+          expectedOutput: r.isSample ? r.expectedOutput : undefined,
+          stdout: r.isSample ? r.stdout : null,
+          stderr: r.isSample ? r.stderr : null,
+          compile_output: r.compile_output,
+        })),
+      };
+
+      return {
+        ...newSubmission,
+        executionResult: sanitizedExecutionResult,
+      };
     }),
 
   // Finish the contest (compute final score from best submissions)
@@ -531,8 +633,20 @@ export const contestRouter = createTRPCRouter({
           .where(eq(contestParticipation.id, allParticipations[i].id));
       }
 
+      // Check authoritative DB clock before returning score/rank to the client
+      const isEnded = await isContestEndedDb(ctx.db, input.contestId);
+      if (!isEnded) {
+        return {
+          success: true,
+          id: updated.id,
+          contestId: updated.contestId,
+          finishedAt: updated.finishedAt,
+          isEnded: false,
+        };
+      }
+
       const finalRank = allParticipations.findIndex((p) => p.id === participation.id) + 1;
-      return { ...updated, rank: finalRank };
+      return { ...updated, rank: finalRank, isEnded: true };
     }),
 
   // Get student contest results / leaderboard
@@ -558,6 +672,52 @@ export const contestRouter = createTRPCRouter({
         throw new TRPCError({ code: "FORBIDDEN", message: "You did not participate in this contest." });
       }
 
+      // Authoritative DB clock check
+      const isEnded = await isContestEndedDb(ctx.db, input.contestId);
+
+      // Safe contest projection to avoid leaking unneeded internal columns
+      const safeContest = {
+        id: foundContest.id,
+        code: foundContest.code,
+        title: foundContest.title,
+        description: foundContest.description,
+        coverImageUrl: foundContest.coverImageUrl,
+        startTime: foundContest.startTime,
+        endTime: foundContest.endTime,
+        totalTime: foundContest.totalTime,
+        totalQuestions: foundContest.totalQuestions,
+        totalScore: foundContest.totalScore,
+      };
+
+      // Count unique questions attempted by this participant
+      const userSubmissions = await ctx.db.query.submission.findMany({
+        where: and(
+          eq(submission.contestParticipationId, participation.id),
+          eq(submission.userId, ctx.user.id)
+        ),
+        columns: { contestQuestionId: true },
+      });
+      const uniqueAttemptedQuestionIds = new Set(userSubmissions.map((s) => s.contestQuestionId));
+      const attemptedCount = uniqueAttemptedQuestionIds.size;
+
+      if (!isEnded) {
+        return {
+          contest: safeContest,
+          isEnded: false,
+          attemptedCount,
+          totalQuestions: foundContest.totalQuestions,
+          participation: {
+            id: participation.id,
+            userId: participation.userId,
+            startedAt: participation.startedAt,
+            finishedAt: participation.finishedAt,
+            score: null,
+            rank: null,
+          },
+          leaderboard: [],
+        };
+      }
+
       const leaderboard = await ctx.db.query.contestParticipation.findMany({
         where: eq(contestParticipation.contestId, input.contestId),
         with: { user: { columns: { name: true, email: true } } },
@@ -565,8 +725,341 @@ export const contestRouter = createTRPCRouter({
         limit: 10,
       });
 
-      return { contest: foundContest, participation, leaderboard };
+      return {
+        contest: safeContest,
+        isEnded: true,
+        attemptedCount,
+        totalQuestions: foundContest.totalQuestions,
+        participation,
+        leaderboard,
+      };
     }),
+
+  // Get student post-contest submission review (solutions, final code, diagnostics)
+  getStudentReview: protectedProcedure
+    .input(z.object({ contestId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const foundContest = await ctx.db.query.contest.findFirst({
+        where: eq(contest.id, input.contestId),
+      });
+
+      if (!foundContest) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Contest not found." });
+      }
+
+      const participation = await ctx.db.query.contestParticipation.findFirst({
+        where: and(
+          eq(contestParticipation.contestId, input.contestId),
+          eq(contestParticipation.userId, ctx.user.id)
+        ),
+      });
+
+      if (!participation || !participation.finishedAt) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You must complete the contest attempt before reviewing your submissions.",
+        });
+      }
+
+      // Authoritative DB clock check — strictly locks solutions until the contest has ended
+      const isEnded = await isContestEndedDb(ctx.db, input.contestId);
+      if (!isEnded) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: `Solutions and detailed review will be available after the contest ends at ${new Date(foundContest.endTime).toLocaleString()}.`,
+        });
+      }
+
+      const contestQuestions = await ctx.db.query.contestQuestion.findMany({
+        where: eq(contestQuestion.contestId, input.contestId),
+        orderBy: (cq, { asc }) => [asc(cq.questionOrder)],
+        with: {
+          question: { columns: { id: true, questionType: true, difficulty: true } },
+          version: true,
+        },
+      });
+
+      const userSubmissions = await ctx.db.query.submission.findMany({
+        where: and(
+          eq(submission.contestParticipationId, participation.id),
+          eq(submission.userId, ctx.user.id)
+        ),
+        orderBy: (s, { asc }) => [asc(s.createdAt)],
+      });
+
+      const reviewQuestions = contestQuestions.map((cq) => {
+        const content = getVersionContent(cq.version);
+        const cqSubs = userSubmissions.filter((s) => s.contestQuestionId === cq.id);
+        const hasAttempted = cqSubs.length > 0;
+        const finalSub = hasAttempted ? cqSubs[cqSubs.length - 1] : null;
+        const bestScore = hasAttempted
+          ? Math.max(...cqSubs.map((s) => s.scoreObtained), 0)
+          : 0;
+
+        let status: "correct" | "partial" | "incorrect" | "unattempted" = "unattempted";
+        if (hasAttempted) {
+          if (bestScore === cq.marks) {
+            status = "correct";
+          } else if (bestScore > 0) {
+            status = "partial";
+          } else {
+            status = "incorrect";
+          }
+        }
+
+        // Format according to questionType
+        if (cq.question.questionType === "mcq") {
+          const studentAnswer = finalSub?.userAnswer ?? null;
+          const isCorrect = studentAnswer === content.correctOptionId;
+
+          return {
+            id: cq.id,
+            questionId: cq.question.id,
+            questionOrder: cq.questionOrder,
+            questionType: "mcq" as const,
+            difficulty: cq.question.difficulty,
+            marks: cq.marks,
+            awardedMarks: bestScore,
+            title: content.title,
+            description: content.description,
+            hint: content.hint,
+            status,
+            options: (content.options as MCQOption[] | null) ?? [],
+            correctOptionId: content.correctOptionId,
+            studentAnswer,
+            isCorrect,
+          };
+        }
+
+        if (cq.question.questionType === "text") {
+          const studentAnswer = finalSub?.userAnswer ?? null;
+          const expectedAnswer = content.correctOptionId ?? "";
+          const isCorrect = (studentAnswer ?? "").trim().toLowerCase() === expectedAnswer.trim().toLowerCase();
+
+          return {
+            id: cq.id,
+            questionId: cq.question.id,
+            questionOrder: cq.questionOrder,
+            questionType: "text" as const,
+            difficulty: cq.question.difficulty,
+            marks: cq.marks,
+            awardedMarks: bestScore,
+            title: content.title,
+            description: content.description,
+            hint: content.hint,
+            status,
+            expectedAnswer,
+            studentAnswer,
+            isCorrect,
+          };
+        }
+
+        // Coding Question
+        const finalCode = finalSub?.userAnswer ?? null;
+        const finalScore = finalSub?.scoreObtained ?? 0;
+        const languageId = finalSub?.languageId ?? null;
+        const executionResult = finalSub?.executionResult as any;
+
+        // Process test cases: sample cases fully exposed; hidden cases exposed ONLY if failed!
+        // Note: submitCode stores test case results under executionResult.details
+        const testCaseDetails = Array.isArray(executionResult?.details)
+          ? executionResult.details
+          : Array.isArray(executionResult?.testCases)
+          ? executionResult.testCases
+          : null;
+
+        let processedTestCases: any[] = [];
+        if (testCaseDetails && testCaseDetails.length > 0) {
+          processedTestCases = testCaseDetails.map((tc: any, index: number) => {
+            const isSample = tc.isSample ?? Boolean(content.testCases?.[index]?.isSample);
+            const isPassed = Boolean(tc.passed);
+
+            if (isSample) {
+              return {
+                index: index + 1,
+                isSample: true,
+                passed: isPassed,
+                input: tc.input ?? content.testCases?.[index]?.input ?? "",
+                expectedOutput: tc.expectedOutput ?? content.testCases?.[index]?.expectedOutput ?? "",
+                stdout: tc.stdout ?? null,
+                stderr: tc.stderr ?? null,
+                compile_output: tc.compile_output ?? null,
+                time: tc.time ?? null,
+                memory: tc.memory ?? null,
+                status: tc.status ?? null,
+              };
+            }
+
+            // Hidden test case: revealed ONLY if the student failed this test case
+            if (!isPassed) {
+              return {
+                index: index + 1,
+                isSample: false,
+                passed: false,
+                input: tc.input ?? content.testCases?.[index]?.input ?? "",
+                expectedOutput: tc.expectedOutput ?? content.testCases?.[index]?.expectedOutput ?? "",
+                stdout: tc.stdout ?? null,
+                stderr: tc.stderr ?? null,
+                compile_output: tc.compile_output ?? null,
+                time: tc.time ?? null,
+                memory: tc.memory ?? null,
+                status: tc.status ?? null,
+              };
+            }
+
+            // Hidden test case passed: keep input/expected output data masked
+            return {
+              index: index + 1,
+              isSample: false,
+              passed: true,
+              time: tc.time ?? null,
+              memory: tc.memory ?? null,
+            };
+          });
+        } else {
+          // If unattempted or no execution result, show sample test cases from question version
+          const sampleCases = (content.testCases ?? []).filter((tc) => tc.isSample);
+          processedTestCases = sampleCases.map((tc, index) => ({
+            index: index + 1,
+            isSample: true,
+            passed: false,
+            input: tc.input,
+            expectedOutput: tc.expectedOutput,
+            stdout: null,
+            stderr: null,
+            unattempted: true,
+          }));
+        }
+
+        return {
+          id: cq.id,
+          questionId: cq.question.id,
+          questionOrder: cq.questionOrder,
+          questionType: "code" as const,
+          difficulty: cq.question.difficulty,
+          marks: cq.marks,
+          awardedMarks: bestScore,
+          bestScore,
+          finalScore,
+          title: content.title,
+          description: content.description,
+          hint: content.hint,
+          status,
+          starterCode: content.starterCode ?? {},
+          allowedLanguages: content.allowedLanguages ?? [50, 54, 62, 63, 71],
+          timeLimit: content.timeLimit,
+          memoryLimit: content.memoryLimit,
+          finalCode,
+          languageId,
+          executionStatus: finalSub?.status ?? null,
+          testCases: processedTestCases,
+        };
+      });
+
+      return {
+        contest: {
+          id: foundContest.id,
+          code: foundContest.code,
+          title: foundContest.title,
+          description: foundContest.description,
+          totalScore: foundContest.totalScore,
+          totalTime: foundContest.totalTime,
+          endTime: foundContest.endTime,
+        },
+        participation: {
+          id: participation.id,
+          score: participation.score,
+          rank: participation.rank,
+          finishedAt: participation.finishedAt,
+        },
+        questions: reviewQuestions,
+      };
+    }),
+
+  // ─── Student Portal Endpoints ─────────────────────────────────────────────
+
+  /**
+   * Retrieves all earlier contests that the authenticated student has joined or attempted.
+   * Enforces strict time-lock: If a contest is still running (NOW() < contest.endTime),
+   * scores and ranks are masked to prevent leaks.
+   */
+  getStudentPastContests: protectedProcedure.query(async ({ ctx }) => {
+    const participations = await ctx.db
+      .select({
+        participationId: contestParticipation.id,
+        contestId: contestParticipation.contestId,
+        joinedAt: contestParticipation.joinedAt,
+        startedAt: contestParticipation.startedAt,
+        finishedAt: contestParticipation.finishedAt,
+        rawScore: contestParticipation.score,
+        rawRank: contestParticipation.rank,
+        contestCode: contest.code,
+        contestTitle: contest.title,
+        contestDescription: contest.description,
+        coverImageUrl: contest.coverImageUrl,
+        startTime: contest.startTime,
+        endTime: contest.endTime,
+        totalQuestions: contest.totalQuestions,
+        totalScore: contest.totalScore,
+        duration: contest.duration,
+        isActive: contest.isActive,
+        isEnded: sql<boolean>`NOW() >= ${contest.endTime}`,
+        isLiveNow: sql<boolean>`NOW() >= ${contest.startTime} AND NOW() < ${contest.endTime}`,
+      })
+      .from(contestParticipation)
+      .innerJoin(contest, eq(contestParticipation.contestId, contest.id))
+      .where(eq(contestParticipation.userId, ctx.user.id))
+      .orderBy(desc(contestParticipation.joinedAt));
+
+    return participations.map((p) => {
+      const isFinished = p.finishedAt !== null;
+      const isEnded = Boolean(p.isEnded);
+      const isLiveNow = Boolean(p.isLiveNow);
+
+      let status: "in_progress" | "results_pending" | "concluded" | "timed_out";
+
+      if (isFinished) {
+        if (isEnded) {
+          status = "concluded";
+        } else {
+          status = "results_pending";
+        }
+      } else {
+        if (isLiveNow) {
+          status = "in_progress";
+        } else {
+          status = "timed_out";
+        }
+      }
+
+      // STRICT TIME-LOCK: zero score/rank leakage while contest is still running
+      const score = status === "concluded" ? p.rawScore : null;
+      const rank = status === "concluded" ? p.rawRank : null;
+      const canReview = status === "concluded";
+
+      return {
+        participationId: p.participationId,
+        contestId: p.contestId,
+        contestCode: p.contestCode,
+        contestTitle: p.contestTitle,
+        contestDescription: p.contestDescription,
+        coverImageUrl: p.coverImageUrl,
+        startTime: p.startTime,
+        endTime: p.endTime,
+        totalQuestions: p.totalQuestions,
+        totalScore: p.totalScore,
+        duration: p.duration,
+        joinedAt: p.joinedAt,
+        startedAt: p.startedAt,
+        finishedAt: p.finishedAt,
+        status,
+        score,
+        rank,
+        canReview,
+        isResultsPending: status === "results_pending",
+      };
+    });
+  }),
 
   // ─── Admin Endpoints ──────────────────────────────────────────────────────
 
@@ -922,5 +1415,245 @@ export const contestRouter = createTRPCRouter({
         .returning();
 
       return updatedContest;
+    }),
+
+  // ─── Admin Submissions Monitoring & Inspection Endpoints ──────────────────
+
+  // Live submissions feed with bi-directional cursor support (Admin only)
+  adminGetSubmissions: adminProcedure
+    .input(
+      z.object({
+        contestId: z.string().optional(),
+        userId: z.string().optional(),
+        status: z.string().optional(),
+        afterCursor: z.coerce.date().optional(), // For live polling (fetches new arrivals)
+        beforeCursor: z.coerce.date().optional(), // For pagination (fetches older history)
+        limit: z.number().min(1).max(100).default(50),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const conditions: any[] = [isNotNull(submission.languageId)]; // Code submissions only
+
+      if (input.contestId && input.contestId !== "ALL") {
+        conditions.push(eq(submission.contestId, input.contestId));
+      }
+      if (input.userId) {
+        conditions.push(eq(submission.userId, input.userId));
+      }
+      if (input.status && input.status !== "ALL") {
+        conditions.push(eq(submission.status, input.status));
+      }
+      if (input.afterCursor) {
+        conditions.push(gt(submission.createdAt, input.afterCursor));
+      }
+      if (input.beforeCursor) {
+        conditions.push(lt(submission.createdAt, input.beforeCursor));
+      }
+
+      // If fetching new arrivals via afterCursor, sort ASC so they can be prepended in arrival order;
+      // otherwise sort DESC to get the newest page.
+      const isLivePoll = !!input.afterCursor;
+
+      const items = await ctx.db.query.submission.findMany({
+        where: and(...conditions),
+        orderBy: (s, { asc, desc }) => [isLivePoll ? asc(s.createdAt) : desc(s.createdAt)],
+        limit: input.limit,
+        with: {
+          user: {
+            columns: {
+              id: true,
+              name: true,
+              email: true,
+              image: true,
+            },
+          },
+          contest: {
+            columns: {
+              id: true,
+              title: true,
+              code: true,
+            },
+          },
+          question: {
+            columns: {
+              id: true,
+              questionType: true,
+            },
+          },
+          contestQuestion: {
+            columns: {
+              id: true,
+              marks: true,
+              questionOrder: true,
+            },
+            with: {
+              version: {
+                columns: {
+                  id: true,
+                  title: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      return items;
+    }),
+
+  // Detailed student submission history for a specific contest (Admin only)
+  adminGetStudentSubmissions: adminProcedure
+    .input(
+      z.object({
+        contestId: z.string(),
+        userId: z.string(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const student = await ctx.db.query.user.findFirst({
+        where: eq(user.id, input.userId),
+        columns: {
+          id: true,
+          name: true,
+          email: true,
+          image: true,
+        },
+      });
+
+      if (!student) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Student not found." });
+      }
+
+      const contestData = await ctx.db.query.contest.findFirst({
+        where: eq(contest.id, input.contestId),
+        columns: {
+          id: true,
+          title: true,
+          code: true,
+          totalScore: true,
+        },
+      });
+
+      if (!contestData) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Contest not found." });
+      }
+
+      const participation = await ctx.db.query.contestParticipation.findFirst({
+        where: and(
+          eq(contestParticipation.contestId, input.contestId),
+          eq(contestParticipation.userId, input.userId)
+        ),
+      });
+
+      // Get all questions in the contest
+      const allCQs = await ctx.db.query.contestQuestion.findMany({
+        where: eq(contestQuestion.contestId, input.contestId),
+        orderBy: (cq, { asc }) => [asc(cq.questionOrder)],
+        with: {
+          question: {
+            columns: {
+              id: true,
+              questionType: true,
+            },
+          },
+          version: {
+            columns: {
+              id: true,
+              title: true,
+              questionScore: true,
+            },
+          },
+        },
+      });
+
+      // Filter to only coding questions (per design, MCQ/text have no code history)
+      const codingQuestions = allCQs.filter((cq: any) => cq.question?.questionType === "code");
+
+      // Fetch all coding submissions by this student for this contest
+      const submissions = await ctx.db.query.submission.findMany({
+        where: and(
+          eq(submission.contestId, input.contestId),
+          eq(submission.userId, input.userId),
+          isNotNull(submission.languageId)
+        ),
+        orderBy: (s, { asc }) => [asc(s.createdAt)],
+      });
+
+      // Compute statistics per coding question (best score, attempt count)
+      const codingQuestionsWithStats = codingQuestions.map((cq: any) => {
+        const questionSubs = submissions.filter((s) => s.contestQuestionId === cq.id);
+        const bestScore = questionSubs.length > 0
+          ? Math.max(...questionSubs.map((s) => s.scoreObtained))
+          : 0;
+        const isAccepted = questionSubs.some((s) => s.status === "Accepted");
+
+        return {
+          contestQuestionId: cq.id,
+          questionId: cq.questionId,
+          questionOrder: cq.questionOrder,
+          marks: cq.marks,
+          title: cq.version?.title || "Coding Problem",
+          bestScore,
+          isAccepted,
+          attemptCount: questionSubs.length,
+        };
+      });
+
+      return {
+        student,
+        contest: contestData,
+        participation,
+        codingQuestions: codingQuestionsWithStats,
+        submissions,
+      };
+    }),
+
+  // List all participants of a contest with submission stats (Admin only)
+  adminGetContestParticipants: adminProcedure
+    .input(z.object({ contestId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const participations = await ctx.db.query.contestParticipation.findMany({
+        where: eq(contestParticipation.contestId, input.contestId),
+        orderBy: (p, { desc }) => [desc(p.score), desc(p.joinedAt)],
+        with: {
+          user: {
+            columns: {
+              id: true,
+              name: true,
+              email: true,
+              image: true,
+            },
+          },
+          submissions: {
+            where: isNotNull(submission.languageId),
+            columns: {
+              id: true,
+              status: true,
+              scoreObtained: true,
+              contestQuestionId: true,
+            },
+          },
+        },
+      });
+
+      return participations.map((p) => {
+        const codeSubs = p.submissions || [];
+        const solvedQuestionsCount = new Set(
+          codeSubs.filter((s) => s.status === "Accepted").map((s) => s.contestQuestionId)
+        ).size;
+
+        return {
+          id: p.id,
+          userId: p.userId,
+          user: p.user,
+          joinedAt: p.joinedAt,
+          startedAt: p.startedAt,
+          finishedAt: p.finishedAt,
+          score: p.score,
+          rank: p.rank,
+          codeSubmissionsCount: codeSubs.length,
+          solvedQuestionsCount,
+        };
+      });
     }),
 });

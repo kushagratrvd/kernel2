@@ -27,6 +27,7 @@ import {
   CheckmarkCircle02Icon,
   AlertCircleIcon,
   SparklesIcon,
+  CodeSquareIcon,
 } from "@hugeicons/core-free-icons";
 
 import { ModeToggle } from "@/components/ui/mode-toggle";
@@ -153,12 +154,20 @@ export default function DashboardPage() {
               </Link>
             )}
             {isAdmin && (
-              <Link
-                href="/dashboard/admin/users"
-                className="px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-              >
-                Users & Roles
-              </Link>
+              <>
+                <Link
+                  href="/dashboard/contests/submissions"
+                  className="px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                >
+                  Live Submissions
+                </Link>
+                <Link
+                  href="/dashboard/admin/users"
+                  className="px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                >
+                  Users & Roles
+                </Link>
+              </>
             )}
           </nav>
 
@@ -222,6 +231,14 @@ export default function DashboardPage() {
             )}
             {isAdmin && (
               <>
+                <Button
+                  onClick={() => router.push("/dashboard/contests/submissions")}
+                  variant="outline"
+                  className="gap-2 rounded-2xl border-primary/30 text-primary hover:bg-primary/10 shadow-sm"
+                >
+                  <HugeiconsIcon icon={CodeSquareIcon} className="size-4" />
+                  Live Submissions
+                </Button>
                 <Button
                   onClick={() => router.push("/dashboard/admin/users")}
                   variant="outline"

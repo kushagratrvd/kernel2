@@ -6,6 +6,98 @@
 
 ---
 
+## 2026-11-15
+
+### [2026-11-15] Decision: Student Contest Hub (`/contest`) with past participated contests and 'Enter Contest Code' modal over public live contest listings because contests are invitation-only classroom events where live exams should not be publicly discoverable without an authorized passcode, and students need a persistent portal to track past contest results, view holding statuses, and launch Monaco solution reviews.
+
+- **Model**: User (Kushagra) + Antigravity (Gemini 3.8 Flash)
+- **Status**: IMPLEMENTED.
+- **Decision Made**: Redesigned `/contest` into a Student Contest Hub displaying earlier participated contests (`getStudentPastContests`), time-locked scores and ranks, direct shortcuts to scorecard and Monaco review workspace, and a prominent "Enter Contest Code" modal to join live contests with a passcode. Excluded public listings of live contests.
+- **Alternatives Considered**:
+  1. Showing a public feed of all active contests — rejected per user specification; live contests must be accessible only via invitation codes.
+  2. Leaving `/contest` as a solitary code input form — rejected because students had no dashboard to revisit past attempts, view concluded contest ranks, or launch post-contest Monaco solution reviews.
+- **Concrete Reason**: Provides students with a centralized hub for their academic contest history while strictly protecting contest privacy by requiring an authorized code to enter live exams.
+
+### [2026-11-15] Decision: Replace native HTML `<select>` dropdowns with Base UI custom Popover Select components (`<Select>`, `<SelectTrigger>`, `<SelectContent>`, `<SelectItem>`) in live submissions feed because native OS dropdowns display sharp, unstyled, non-theme-responsive platform menus, whereas custom Base UI selects match application tokens, dark mode, and provide status color badges.
+
+- **Model**: User (Kushagra) + Antigravity (Gemini 3.8 Flash)
+- **Status**: IMPLEMENTED.
+- **Decision Made**: Replaced native HTML `<select>` and `<option>` elements on `/dashboard/contests/submissions` with `@/components/ui/select` primitives (`Select`, `SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem`), providing themed floating popovers, rounded borders, and colored status dots.
+- **Alternatives Considered**:
+  1. Keeping native `<select>` — rejected because Windows/browser renders default unstyled OS popups with bright blue selection bars that break UI theme consistency.
+  2. Custom dropdown state written from scratch — rejected because `@/components/ui/select` is already pre-configured with Base UI primitives, keyboard accessibility, and focus rings.
+- **Concrete Reason**: Seamlessly unifies the filter bar aesthetics with the rest of the dark/light design system while providing immediate visual feedback through color-coded status badges.
+
+### [2026-11-15] Decision: Post-contest result time-lock (`NOW() >= contest.endTime`) and dedicated fullscreen review workspace (`/contest/[code]/review`) with strict final attempt display and selective hidden test case failure diagnostics over immediate result release or inline accordions because early result releases leak solutions to active participants, while post-contest failure diagnostics enable learning without compromising future question integrity.
+
+- **Model**: User (Kushagra) + Antigravity (Gemini 3.8 Flash)
+- **Status**: DESIGN APPROVED — ready for implementation.
+- **Decision Made**:
+  1. Guarded `getResults` score, rank, and leaderboard fields behind `NOW() >= contest.endTime`. If contest is still running, students who finish early see only the count of attempted questions.
+  2. Built a dedicated review workspace at `/contest/[code]/review` replicating the `/contest/[code]/attempt` layout with color-coded question pills (🟢 Correct, 🟡 Partial, 🔴 Incorrect, ⚪ Unattempted).
+  3. Strict Final attempt code displayed in read-only Monaco editor, with explicit notification if the counted Best Score differed from the final attempt.
+  4. Coding test case visibility: Sample test cases always visible; hidden test cases are revealed with inputs/expected/outputs *only if the student's submission failed on that hidden test case*.
+- **Alternatives Considered**:
+  1. Immediate full result release on finish attempt — rejected because students who finish 30 minutes early can share correct answers with classmates still taking the exam.
+  2. Releasing all hidden test cases — rejected because it permanently leaks private test cases, preventing questions from being reused in future exams.
+  3. Showing the best-scoring submission instead of the final submission — rejected based on user requirement to review the student's exact final code submission, with score reconciliation if best was higher.
+- **Concrete Reason**: Enforces exam integrity during live contests while delivering a superior post-contest learning experience with exact final code retrospection and targeted failure debugging.
+
+---
+
+## 2026-11-14
+
+### [2026-11-14] Decision: Dedicated AWS EC2 VPS with prebuilt Docker Hub containers over Render PaaS for CodeBox code runner sandbox because untrusted code execution requires host cgroups v2 (`cgroup: host`) and privileged container permissions (`privileged: true`) for Linux `isolate` sandboxing which unprivileged PaaS platforms reject.
+
+- **Model**: User (Kushagra) + Antigravity (Gemini 3.8 Flash)
+- **Status**: IMPLEMENTED.
+- **Decision Made**: Configured CodeBox code execution runner on an AWS EC2 instance (`13.48.249.168`) using prebuilt Docker Hub images (`hiteshchoudhary/codebox-api`, `codebox-worker`, `redis`, `caddy`) with `cgroup: host` and `privileged: true` isolate sandboxing. Dispatched submission calls from Kernel2 (`src/server/codebox.ts` and `trpc.contest.submitCode`) via `CODEBOX_URL` and `CODEBOX_TOKEN`.
+- **Alternatives Considered**:
+  1. Hosting on Render / standard PaaS — rejected because PaaS containers run in restricted unprivileged environments without Docker socket (`/var/run/docker.sock`) or host cgroup v2 control, failing sandbox initialization.
+  2. Building compiler images locally on EC2 (`gcc:9` Debian Bullseye) — rejected because Debian 11 Bullseye reached EOL causing 404 package errors during `unzip` apt fetch. Prebuilt Docker Hub worker already bundles compilers in Ubuntu 22.04 with `isolate`.
+- **Concrete Reason**: Provides a production-grade, highly secure execution environment capable of evaluating submissions across Python, Node, C, C++, and Java with strict CPU/memory quotas and millisecond timing guarantees.
+
+### [2026-11-14] Decision: Denormalize `contest_id` directly onto `submission` table with composite indexing over multi-table joins because contest live monitoring requires sub-second queries on `(contest_id, created_at)` without traversing `contest_participation`.
+
+- **Model**: User (Kushagra) + Antigravity (Gemini 3.8 Flash)
+- **Status**: IMPLEMENTED.
+- **Decision Made**: Added `contestId` to `submission` table with composite index `(contest_id, created_at DESC)` and backfilled existing submissions using `contest_participation.contest_id`.
+- **Alternatives Considered**:
+  1. Leaving schema unchanged and joining `contest_participation` on every live feed tick — rejected because live polling every 4 seconds across dozens of simultaneous contests creates heavy cross-table join contention.
+  2. Storing contest metadata in a Redis cache only — rejected because submissions must be durably stored and queryable with historical pagination.
+- **Concrete Reason**: Enables index-only cursor scans (`WHERE contest_id = ? AND created_at > ?`) for ultra-fast polling without database strain.
+
+### [2026-11-14] Decision: Bi-directional timestamp cursor live polling (`afterCursor` for prepends, `beforeCursor` for historical pagination) over offset pagination or WebSockets because polling with `afterCursor` guarantees zero skipped submissions during high-frequency ingestion without the operational overhead of a persistent WebSocket server.
+
+- **Model**: User (Kushagra) + Antigravity (Gemini 3.8 Flash)
+- **Status**: IMPLEMENTED.
+- **Decision Made**: In `adminGetSubmissions`, implemented `afterCursor` (`WHERE created_at > afterCursor ORDER BY created_at ASC`) which client prepends to top of feed, and `beforeCursor` (`WHERE created_at < beforeCursor ORDER BY created_at DESC`) for loading older submissions.
+- **Alternatives Considered**:
+  1. Offset pagination (`page`, `pageSize`) — rejected because new submissions prepending at the top cause offset drift, resulting in duplicate or skipped rows on every poll.
+  2. Persistent WebSockets / Server-Sent Events (SSE) — rejected because it introduces stateful connection tracking and infrastructure complexity while a 4-second cursor poll satisfies latency requirements with zero state overhead.
+- **Concrete Reason**: Provides a jitter-free, seamless live feed where newly arriving submissions smoothly prepend without disrupting the admin's scroll position or missing records.
+
+### [2026-11-14] Decision: Per-Student inspection drawer with problem pill selector and chronological attempts over per-problem modal because admins evaluate student performance contextually across all contest tasks.
+
+- **Model**: User (Kushagra) + Antigravity (Gemini 3.8 Flash)
+- **Status**: IMPLEMENTED.
+- **Decision Made**: Built `<StudentSubmissionsDrawer />` keyed to `(contestId, userId)`. Header displays student summary and contest rank; top selector switches between all coding questions in the contest; body shows chronological attempt list with Monaco code viewer and failed test case diffs.
+- **Alternatives Considered**:
+  1. Per-problem drawer showing all students' submissions for one problem — rejected because admins diagnosing student behavior need to see all problems the student attempted, their progression across tasks, and total code attempts in that contest.
+- **Concrete Reason**: Provides a holistic, comprehensive student view in a single slide-over drawer without requiring the admin to click into multiple modals or navigate away from the live feed.
+
+### [2026-11-14] Decision: Store complete test case execution diagnostics (stdin, stdout, stderr, expected) in DB `execution_result` while returning sanitized results to the student runner because admins require deep debugging visibility while preventing private test case data leaks in client DevTools.
+
+- **Model**: User (Kushagra) + Antigravity (Gemini 3.8 Flash)
+- **Status**: IMPLEMENTED.
+- **Decision Made**: In `submitCode`, full test case diagnostic records (`input`, `expectedOutput`, `stdout`, `stderr`, `compile_output`, `time`, `memory`, `passed`, `isSample`) are written to DB `submission.executionResult`. The client response continues to sanitize private test cases so students cannot inspect hidden test inputs/outputs in browser DevTools.
+- **Alternatives Considered**:
+  1. Returning full diagnostics to the student runner — rejected because it leaks hidden evaluation test cases, compromising contest integrity.
+  2. Storing only pass/fail booleans in the DB — rejected because admins cannot diagnose why student code failed without seeing actual vs expected outputs.
+- **Concrete Reason**: Satisfies both administrative diagnostic requirements and student-side examination security.
+
+---
+
 ## 2026-10-01
 
 ### [2026-10-01] Decision: Unified Create/Edit Question Studio dialog with auto-prefilling and state recovery over dedicated separate edit page because reusing the comprehensive question authoring modal avoids code duplication, preserves inline taxonomy/markdown preview workflows, and provides instant transition between drafting and editing.

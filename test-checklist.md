@@ -45,7 +45,42 @@
 
 ---
 
-## 3. Question Bank & Reviewer Workflow Tests
+## 7. Admin Code Submissions Monitoring Verification
+
+### Test 7.1: Type Safety & Compilation
+- **Command**:
+  ```bash
+  pnpm exec tsc --noEmit
+  ```
+- **Expected Exit Code**: `0`
+- **Expected Output**: Zero compiler errors across all new admin endpoints and UI components.
+
+### Test 7.2: Submission Schema `contest_id` Constraint
+- **Target**: `submission` table in Drizzle schema.
+- **Criteria**:
+  - `contestId` is defined on `submission` with a foreign key to `contest.id` (cascade on delete).
+  - Both `submitCode` and `submitMcqOrTextAnswer` pass `contestId` into `ctx.db.insert(submission)`.
+  - Indexes: `submission_contest_id_idx` and `submission_contest_created_at_idx`.
+
+### Test 7.3: Diagnostic Redaction for Students
+- **Target**: `trpc.contest.submitCode`
+- **Criteria**:
+  - Full diagnostic data (all test cases including hidden input/expected) is saved in database `executionResult`.
+  - Return payload to student strips hidden test case `input`, `expectedOutput`, `stdout`, and `stderr` (only `isSample === true` cases retain stdout/stderr).
+
+### Test 7.4: Admin Live Submissions Query & Access Guard
+- **Target**: `trpc.contest.adminGetSubmissions`
+- **Criteria**:
+  - Guarded by `adminProcedure` (rejects non-admins with FORBIDDEN).
+  - Code submissions only (`languageId IS NOT NULL`).
+  - Supports `afterCursor` for fetching only new submissions and `beforeCursor` for paginating into older submissions.
+
+### Test 7.5: Student Inspection Drawer & UI
+- **Target**: `<StudentSubmissionsDrawer />`
+- **Criteria**:
+  - Problem switcher renders only `questionType = 'code'` problems.
+  - Displays chronological attempts, Monaco code viewer in read-only mode, and diagnostic diffs for failed test cases.
+
 
 ### Test 3.1: Question Creation to Submission
 1. Creator creates question in Question Studio.
@@ -147,3 +182,98 @@
 - **Action**: Run code against sample inputs in Question Studio or Contest Attempt.
 - **Expected Result**:
   - Codebox returns status `Accepted` for correct outputs, or `Wrong Answer` / `Compile Error` / `Time Limit Exceeded` when thresholds are exceeded.
+
+---
+
+## 5. Admin Code Submissions Live Monitoring & Inspection Checklist
+
+### 5.1 Type & Schema Verification
+- **Command**: `pnpm exec tsc --noEmit`
+- **Expected Output**: Exit code `0` with zero TypeScript errors.
+
+### 5.2 Global Live Submissions Feed (`/dashboard/contests/submissions`)
+- **Action**: Navigate to `/dashboard/contests/submissions` as an Admin.
+- **Expected Outputs**:
+  - Header displays "Code Submissions Live Feed" with an active live pulse badge.
+  - Contest dropdown, Status dropdown (All, Accepted, Wrong Answer, etc.), and Student Search input are operational.
+  - Submissions table renders with columns: Time, Student, Contest, Problem, Language, Status, Passed, Score, Execution.
+  - Every 4 seconds, live polling triggers `afterCursor` query without full page refresh or scroll jumping.
+  - Clicking "View Student" opens the `<StudentSubmissionsDrawer />` for that student.
+
+### 5.3 Per-Contest Submissions & Participants Tabs (`/dashboard/contests/[id]`)
+- **Action**: Open `/dashboard/contests/[id]` as an Admin.
+- **Expected Outputs**:
+  - Tab bar renders: "Questions & Settings", "Live Submissions", "Participants".
+  - Switching to "Live Submissions" loads only submissions for this contest with 4s auto-polling.
+  - Switching to "Participants" displays all registered students with solved coding problem counts, total submissions, and rank.
+  - Clicking "Inspect Submissions" on any participant row opens the `<StudentSubmissionsDrawer />`.
+
+### 5.4 Student Submissions Drawer (`<StudentSubmissionsDrawer />`)
+- **Action**: Open the drawer for a student with coding submissions.
+- **Expected Outputs**:
+  - Student name, email, rank, and score are displayed in the header.
+  - Coding problem pill selector lists all coding problems in the contest with best score badges.
+  - Selecting a problem displays chronological attempts (Attempt #1, Attempt #2, ...).
+  - Clicking "View Code" opens the read-only Monaco editor syntax-highlighted in the submitted language.
+  - For failed attempts, expandable test case cards display input, expected output, and actual student stdout/stderr.
+  - For passed test cases, simple green badge displays without polluting diff view.
+
+### 5.5 Student API Response Sanitization & Examination Security
+- **Action**: Inspect Network tab during a student code submission in `/contest/[code]`.
+- **Expected Outputs**:
+  - `submission.executionResult` in DB contains full test case inputs, expected outputs, stdout, and stderr for all test cases.
+  - The client response returned to the student runner redacts private/hidden test case inputs and expected outputs (e.g. `[Hidden Test Case]`).
+
+---
+
+## 6. Post-Contest Student Submissions Review & Result Visibility Checklist
+
+### 6.1 Type & Schema Verification
+- **Command**: `pnpm exec tsc --noEmit`
+- **Expected Output**: Exit code `0` with zero TypeScript errors.
+
+### 6.2 Active Contest Holding State (`NOW() < contest.endTime`)
+- **Action**: Complete a contest attempt before the contest end time and view `/contest/[code]/results`.
+- **Expected Outputs**:
+  - Displays "Contest Completed — Results Pending".
+  - Shows "Questions Attempted: X / Y".
+  - Scores, ranks, and leaderboard are NOT rendered.
+  - "Review My Submissions" button is hidden.
+  - Attempting to query `trpc.contest.getStudentReview` directly returns `FORBIDDEN` ("Solutions and review will be available after the contest ends at [endTime]").
+
+### 6.3 Concluded Contest Results (`NOW() >= contest.endTime`)
+- **Action**: Open `/contest/[code]/results` after the contest has ended.
+- **Expected Outputs**:
+  - Congratulations card displays final score, total score, and official rank.
+  - Leaderboard is populated with top participants and "You" indicator.
+  - Prominent "Review My Submissions" button is visible and active.
+
+### 6.4 Fullscreen Review Workspace (`/contest/[code]/review`)
+- **Action**: Click "Review My Submissions" to open `/contest/[code]/review`.
+- **Expected Outputs**:
+  - Header displays contest title, "Review Mode" badge, total score, and theme toggle.
+  - Question Navigator displays color-coded pills (🟢 Correct, 🟡 Partial, 🔴 Incorrect, ⚪ Unattempted).
+  - Left panel shows question title, difficulty, marks awarded vs max marks, markdown problem description, and optional hint.
+  - **MCQ Questions**: Shows all options with student's chosen option tagged ("Your Answer") and correct option highlighted in green ("Correct Answer").
+  - **Text Questions**: Shows student's submitted text vs expected answer.
+  - **Coding Questions**:
+    - Displays student's strict final submitted code in read-only Monaco editor.
+    - If final attempt score != best score, displays reconciliation banner: *"Final Attempt (Score: X/max) — Best Score Counted: Y/max"*.
+    - Sample test cases show input, expected output, and stdout.
+    - Hidden test cases: Passed hidden test cases show green "Passed (Private)" badge without input/output leak. Failed hidden test cases show input, expected output, and stdout/stderr so the student can diagnose their error.
+  - **Unattempted Questions**: Clearly displays "You did not attempt this question", 0 marks awarded, while revealing the correct answer / starter code.
+
+### 6.5 Student Contest Hub & Earlier Participated Contests Verification
+- **Target**: `/contest` (Student Landing Page) & `trpc.contest.getStudentPastContests`
+- **Actions & Expected Outputs**:
+  1. **Enter Contest Code Modal**:
+     - Clicking "Enter Contest Code" opens Base UI `<Dialog>` modal.
+     - Input automatically focuses with monospace uppercase styling.
+     - Submitting valid code (e.g. `KRN101`) navigates student to `/contest/KRN101`.
+  2. **Past Contests Cards Grid**:
+     - Concluded contests (`NOW() >= endTime`): Displays score and rank badges, with direct "Scorecard" (`/results`) and "Review" (`/review`) buttons.
+     - Live submitted contests (`NOW() < endTime`): Displays "Results Pending" badge with score/rank strictly masked; clicking "View Holding Status" directs to `/results` holding screen.
+     - In-progress contests: Displays "In Progress" badge with a direct "Resume Attempt" (`/attempt`) button.
+  3. **Empty State**:
+     - For students with 0 past participations, displays a friendly empty state card with an "Enter Contest Code" button.
+

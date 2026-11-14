@@ -40,6 +40,7 @@ const LANGUAGES = [
 
 import { ModeToggle } from "@/components/ui/mode-toggle";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
+import { useTheme } from "next-themes";
 
 export default function ContestAttemptPage({
   params,
@@ -51,6 +52,8 @@ export default function ContestAttemptPage({
   const code = resolvedParams.code;
   const trpc = useTRPC();
   const { data: session } = authClient.useSession();
+  const { resolvedTheme } = useTheme();
+  const monacoTheme = resolvedTheme === "dark" ? "vs-dark" : "vs";
 
   // Fetch contest details & questions
   const { data, isLoading, error, refetch } = useQuery(
@@ -437,7 +440,7 @@ export default function ContestAttemptPage({
                   <div className="space-y-4">
                     <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Sample Test Cases</h3>
                     {currentQuestion.testCases?.map((tc: any, index: number) => (
-                      <div key={tc.id} className="space-y-2.5">
+                      <div key={tc.id ?? `sample_tc_${index}`} className="space-y-2.5">
                         <div className="text-xs font-bold text-foreground">Sample Case #{index + 1}</div>
                         <div className="grid gap-3 sm:grid-cols-2">
                           <div className="space-y-1">
@@ -465,8 +468,8 @@ export default function ContestAttemptPage({
               <ResizablePanel defaultSize={60} minSize={35}>
                 <ResizablePanelGroup orientation="vertical" className="h-full">
                   {/* Editor workspace */}
-                  <ResizablePanel defaultSize={65} minSize={40} className="flex flex-col min-h-0">
-                    <div className="flex items-center justify-between border-b border-border/30 bg-card/60 px-4 py-2">
+                  <ResizablePanel defaultSize={65} minSize={40} className="flex flex-col min-h-0 bg-background">
+                    <div className="flex items-center justify-between border-b border-border/40 bg-card px-4 py-2 shrink-0">
                       <div className="flex items-center gap-2">
                         <HugeiconsIcon icon={CodeIcon} className="size-4 text-muted-foreground" />
                         <span className="text-xs font-bold text-muted-foreground uppercase">Editor</span>
@@ -490,11 +493,11 @@ export default function ContestAttemptPage({
                       </div>
                     </div>
 
-                    <div className="flex-1 relative min-h-0 bg-[#1e1e1e]">
+                    <div className="flex-1 relative min-h-0 bg-white dark:bg-[#1e1e1e]">
                       <Editor
                         height="100%"
                         language={activeLangObj.monacoKey}
-                        theme="vs-dark"
+                        theme={monacoTheme}
                         value={editorCode}
                         onChange={(val) => {
                           setCodeEditorValues({
@@ -520,10 +523,10 @@ export default function ContestAttemptPage({
                     minSize={15} 
                     collapsible 
                     panelRef={consolePanelRef}
-                    className="bg-card border-t border-border/30 flex flex-col min-h-0"
+                    className="bg-card border-t border-border/40 flex flex-col min-h-0"
                   >
                     {/* Console Header */}
-                    <div className="flex items-center justify-between border-b border-border/30 bg-muted/20 px-6 py-2 shrink-0">
+                    <div className="flex items-center justify-between border-b border-border/40 bg-muted/20 px-6 py-2 shrink-0">
                       <div className="flex items-center gap-4">
                         <button
                           onClick={() => setConsoleTab("run")}
@@ -602,7 +605,7 @@ export default function ContestAttemptPage({
                     </div>
 
                     {/* Console Body */}
-                    <div className="flex-1 overflow-y-auto p-5 font-mono text-xs bg-black/90 text-zinc-300">
+                    <div className="flex-1 overflow-y-auto p-5 font-mono text-xs bg-card dark:bg-black/90 text-foreground dark:text-zinc-300">
                       {consoleTab === "run" ? (
                         isRunningCode ? (
                           <div className="flex items-center gap-2 text-muted-foreground">
@@ -614,47 +617,47 @@ export default function ContestAttemptPage({
                             {runResults.map((res, index) => {
                               const runPassed = res.passed;
                               return (
-                                <div key={index} className="space-y-2 border-b border-zinc-800/80 pb-3 last:border-0 last:pb-0">
+                                <div key={index} className="space-y-2 border-b border-border/40 dark:border-zinc-800/80 pb-3 last:border-0 last:pb-0">
                                   <div className="flex items-center justify-between">
                                     <span className="font-bold text-foreground">Sample Case #{index + 1}</span>
-                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
                                       runPassed 
-                                        ? "bg-green-500/10 text-green-400" 
-                                        : "bg-red-500/10 text-red-400"
+                                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30" 
+                                        : "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/30"
                                     }`}>
                                       {runPassed ? "PASSED" : "FAILED"}
                                     </span>
                                   </div>
 
-                                  <div className="grid gap-2 sm:grid-cols-2 text-[11px] text-zinc-400">
+                                  <div className="grid gap-2 sm:grid-cols-2 text-[11px] text-muted-foreground">
                                     <div>
                                       <div className="text-[10px] text-muted-foreground font-bold">Input stdin:</div>
-                                      <pre className="p-2 bg-zinc-900 rounded overflow-auto mt-1 max-h-16">{res.input || "<empty>"}</pre>
+                                      <pre className="p-2 bg-muted/60 dark:bg-zinc-900 border border-border/30 dark:border-zinc-800 rounded mt-1 overflow-auto max-h-16 text-foreground dark:text-zinc-300">{res.input || "<empty>"}</pre>
                                     </div>
                                     <div>
                                       <div className="text-[10px] text-muted-foreground font-bold">Expected stdout:</div>
-                                      <pre className="p-2 bg-zinc-900 rounded overflow-auto mt-1 max-h-16">{res.expectedOutput}</pre>
+                                      <pre className="p-2 bg-muted/60 dark:bg-zinc-900 border border-border/30 dark:border-zinc-800 rounded mt-1 overflow-auto max-h-16 text-foreground dark:text-zinc-300">{res.expectedOutput}</pre>
                                     </div>
                                   </div>
 
                                   {res.compile_output ? (
-                                    <div className="text-red-400 mt-2">
-                                      <div className="font-bold text-[10px] text-red-500">Compilation Error:</div>
-                                      <pre className="p-2 bg-red-950/20 rounded mt-1 overflow-auto whitespace-pre-wrap">{res.compile_output}</pre>
+                                    <div className="text-rose-700 dark:text-rose-400 mt-2">
+                                      <div className="font-bold text-[10px] text-rose-600 dark:text-rose-500">Compilation Error:</div>
+                                      <pre className="p-2 bg-rose-500/10 border border-rose-500/30 rounded mt-1 overflow-auto whitespace-pre-wrap">{res.compile_output}</pre>
                                     </div>
                                   ) : res.stderr ? (
-                                    <div className="text-red-400 mt-2">
-                                      <div className="font-bold text-[10px] text-red-500">Stderr:</div>
-                                      <pre className="p-2 bg-red-950/20 rounded mt-1 overflow-auto whitespace-pre-wrap">{res.stderr}</pre>
+                                    <div className="text-rose-700 dark:text-rose-400 mt-2">
+                                      <div className="font-bold text-[10px] text-rose-600 dark:text-rose-500">Stderr:</div>
+                                      <pre className="p-2 bg-rose-500/10 border border-rose-500/30 rounded mt-1 overflow-auto whitespace-pre-wrap">{res.stderr}</pre>
                                     </div>
                                   ) : (
-                                    <div className="mt-2 text-zinc-300">
+                                    <div className="mt-2 text-foreground dark:text-zinc-300">
                                       <div className="font-bold text-[10px] text-muted-foreground">Output:</div>
-                                      <pre className="p-2 bg-zinc-900 rounded mt-1 overflow-auto max-h-20">{res.stdout || "<no output>"}</pre>
+                                      <pre className="p-2 bg-muted/60 dark:bg-zinc-900 border border-border/30 dark:border-zinc-800 rounded mt-1 overflow-auto max-h-20">{res.stdout || "<no output>"}</pre>
                                     </div>
                                   )}
 
-                                  <div className="flex gap-4 mt-2 text-[10px] text-zinc-500">
+                                  <div className="flex gap-4 mt-2 text-[10px] text-muted-foreground">
                                     <span>Time: {res.time || "0.00"}s</span>
                                     <span>Memory: {res.memory || "0"} KB</span>
                                     <span>Status: {res.status?.description}</span>
@@ -677,18 +680,18 @@ export default function ContestAttemptPage({
                           </div>
                         ) : submitResult ? (
                           <div className="space-y-4">
-                            <div className="rounded-2xl border border-zinc-800 p-4 bg-zinc-900/40 space-y-2">
+                            <div className="rounded-2xl border border-border/40 dark:border-zinc-800 p-4 bg-muted/30 dark:bg-zinc-900/40 space-y-2">
                               <div className="flex justify-between items-center">
                                 <span className="font-bold text-sm text-foreground">Submission Status:</span>
-                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
                                   submitResult.status === "Accepted"
-                                    ? "bg-green-500/10 text-green-400"
-                                    : "bg-red-500/10 text-red-400"
+                                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                                    : "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/30"
                                 }`}>
                                   {submitResult.status}
                                 </span>
                               </div>
-                              <div className="flex gap-6 text-xs text-zinc-400">
+                              <div className="flex gap-6 text-xs text-muted-foreground">
                                 <div>
                                   Passed: <span className="text-foreground font-bold">{submitResult.executionResult?.passedCount}</span> / {submitResult.executionResult?.totalCount}
                                 </div>
@@ -703,9 +706,9 @@ export default function ContestAttemptPage({
                               <div className="space-y-3 pt-2">
                                 <div className="text-xs font-bold text-muted-foreground uppercase">Sample Test Case Verifications</div>
                                 {submitResult.executionResult.details.filter((d: any) => d.isSample).map((d: any, i: number) => (
-                                  <div key={i} className="flex justify-between items-center p-2 bg-zinc-900/30 rounded border border-zinc-800/40 text-[11px]">
-                                    <span className="text-zinc-400">Sample Case #{i + 1}</span>
-                                    <span className={`font-bold ${d.passed ? "text-green-400" : "text-red-400"}`}>
+                                  <div key={i} className="flex justify-between items-center p-2 bg-muted/40 dark:bg-zinc-900/30 rounded border border-border/40 dark:border-zinc-800/40 text-[11px]">
+                                    <span className="text-muted-foreground">Sample Case #{i + 1}</span>
+                                    <span className={`font-bold ${d.passed ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
                                       {d.passed ? "Passed" : d.status?.description || "Failed"}
                                     </span>
                                   </div>

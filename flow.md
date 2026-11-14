@@ -394,5 +394,126 @@
   - `trpc.questionBank.adminRestoreToDraft`: transitions question from `REJECTED` back to `DRAFT`, allowing author to revise `currentDraft` and resubmit.
   - `trpc.questionBank.archiveQuestion`: transitions question from `APPROVED` to `ARCHIVED`, hiding it from future contest creation while preserving existing `contestQuestion` references.
   - `trpc.questionBank.unarchiveQuestion`: transitions question from `ARCHIVED` directly back to `APPROVED` without requiring re-review.
-- **Security Check**: All 4 endpoints are strictly guarded by `adminProcedure` in [`src/server/trpc/init.ts`](file:///d:/contest-platform/src/server/trpc/init.ts).
+---
+
+## 8. Admin Code Submissions Monitoring & Inspection Flow
+
+```
+[ Admin ]
+    │
+    ├──> 1. Opens Global Feed: /dashboard/contests/submissions
+    │      │
+    │      ├──> Auto-poll every 4s with afterCursor: trpc.contest.adminGetSubmissions
+    │      └──> Filters: Contest, Status, Student Search
+    │
+    ├──> 2. Or opens Contest Detail: /dashboard/contests/[id]
+    │      │
+    │      ├──> Submissions Tab: trpc.contest.adminGetSubmissions({ contestId })
+    │      └──> Participants Tab: trpc.contest.adminGetContestParticipants({ contestId })
+    │
+    └──> 3. Clicks "Inspect" on any student / submission
+           │
+           ▼
+     [ <StudentSubmissionsDrawer /> ]
+           │
+           ├──> trpc.contest.adminGetStudentSubmissions({ contestId, userId })
+           │      └── Returns student info, coding problem list with best scores,
+           │          and full attempts with code + diagnostic logs
+           ▼
+     [ Monaco Editor (Source Code) + Expandable Test Case Diffs (Input/Expected/Stdout/Stderr) ]
+```
+
+- **Entry Points**:
+  - Global Feed: [`src/app/dashboard/contests/submissions/page.tsx`](file:///d:/kernel2/src/app/dashboard/contests/submissions/page.tsx)
+  - Contest Tabs: [`src/app/dashboard/contests/[id]/page.tsx`](file:///d:/kernel2/src/app/dashboard/contests/[id]/page.tsx)
+  - Student Drawer: [`src/components/contests/student-submissions-drawer.tsx`](file:///d:/kernel2/src/components/contests/student-submissions-drawer.tsx)
+- **Functions Called**:
+  - `trpc.contest.adminGetSubmissions`: bi-directional cursor querying on `submission` with indexed `contest_id` and `created_at`.
+  - `trpc.contest.adminGetStudentSubmissions`: loads coding attempts, best scores, and full test case diagnostics for a single student.
+  - `trpc.contest.adminGetContestParticipants`: loads participants list with submission counts.
+- **Security Guard**: All 3 queries are guarded by `adminProcedure`. Student response in `submitCode` redacts hidden test case details.
+
+---
+
+## 9. Post-Contest Student Submissions Review & Result Visibility Flow
+
+```
+[ Student Finishes Contest Attempt ]
+                 │
+                 ▼
+[ Redirect to /contest/[code]/results ]
+                 │
+                 ├── Calls trpc.contest.getResults({ contestId })
+                 │
+        ┌────────┴──────────────────────────┐
+        │                                   │
+        ▼ (isEnded === false)               ▼ (isEnded === true)
+[ Holding State Screen ]           [ Official Results Screen ]
+├── "Contest Finished"             ├── Final Score & Rank Cards
+├── Attempted: X / Y questions     ├── Leaderboard (Top 10 + You)
+├── Scores & Ranks locked          └── Button: "Review My Submissions"
+└── Unlock Notice: at endTime                       │
+                                                    ▼
+                                    [ Navigates to /contest/[code]/review ]
+                                                    │
+                                                    ├── Calls trpc.contest.getStudentReview({ contestId })
+                                                    │     ├── Verifies NOW() >= contest.endTime
+                                                    │     └── Returns questions with final submitted code,
+                                                    │         correct answers, & test diagnostics
+                                                    ▼
+                                    [ Fullscreen Review Workspace ]
+                                    ├── Question Navigator (🟢 Correct, 🟡 Partial, 🔴 Incorrect, ⚪ Unattempted)
+                                    ├── Left: Description, Marks Awarded / Max Marks, Hint
+                                    └── Right:
+                                          ├── MCQ: Options + "Your Answer" + "Correct Answer"
+                                          ├── Text: Student Answer vs Expected
+                                          └── Code: Read-only Monaco Editor (Final Code)
+                                                ├── Best Score vs Final Attempt Reconciliation Banner
+                                                ├── Sample Test Cases (all displayed)
+                                                └── Hidden Test Cases (revealed ONLY if failed)
+```
+
+- **Entry Points**:
+  - Results Page: [`src/app/contest/[code]/results/page.tsx`](file:///d:/kernel2/src/app/contest/[code]/results/page.tsx)
+  - Review Workspace: [`src/app/contest/[code]/review/page.tsx`](file:///d:/kernel2/src/app/contest/[code]/review/page.tsx)
+- **Functions Called**:
+  - `trpc.contest.getResults`: hides scores/ranks if `NOW() < contest.endTime`; shows full score and rank once contest has ended.
+  - `trpc.contest.getStudentReview`: returns detailed breakdown of student's final submission vs correct answers for all questions.
+- **Security Guard**: Enforces `new Date() >= new Date(contest.endTime)` in both `getResults` (for score/rank data) and `getStudentReview` (for correct answers). Hidden test cases that passed are never revealed.
+
+---
+
+## 10. Student Contest Hub & Participation Review Flow
+
+```
+[ Student Navigates to /contest ]
+                 │
+                 ├── Calls trpc.contest.getStudentPastContests()
+                 │     ├── Queries contest_participation JOIN contest (for ctx.user.id)
+                 │     ├── Calculates DB time-locks: NOW() >= contest.endTime & NOW() < contest.endTime
+                 │     └── Returns:
+                 │           - Concluded: Score, Rank, canReview: true
+                 │           - Results Pending: Score: null, Rank: null, isResultsPending: true
+                 │           - In Progress: startedAt, isInProgress: true
+                 │
+        ┌────────┴──────────────────────────────────────────┐
+        │                                                   │
+        ▼ (Click "Enter Contest Code")                      ▼ (Browse Past Participations)
+[ Base UI Dialog Modal ]                            [ Past Contests Cards Grid ]
+├── Input: Contest Code (autofocus, uppercase)      ├── Concluded:
+├── Action: "Proceed to Contest"                    │     ├── "Scorecard" -> /contest/[code]/results
+└── Router: /contest/[code]                         │     └── "Review" -> /contest/[code]/review
+        │                                           ├── Results Pending:
+        ▼                                           │     └── "View Holding Status" -> /contest/[code]/results
+[ Contest Cover Page /contest/[code] ]              └── In Progress:
+├── Verifies contest existence & start time               └── "Resume Attempt" -> /contest/[code]/attempt
+└── "Start Attempt" -> /contest/[code]/attempt
+```
+
+- **Entry Points**:
+  - Hub Page: [`src/app/contest/page.tsx`](file:///d:/kernel2/src/app/contest/page.tsx)
+- **Functions Called**:
+  - `trpc.contest.getStudentPastContests`: Enforces authoritative DB time-lock (`NOW() >= contest.endTime`) to sanitize scores and prevent score leaks during live contests while presenting a comprehensive dashboard of completed and ongoing exams.
+
+
 

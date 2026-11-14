@@ -79,6 +79,28 @@ git revert --no-edit HEAD
 pnpm exec tsc --noEmit
 ```
 
+### Recipe E: Revert Admin Code Submissions Monitoring
+If the admin submissions monitoring and live feed feature needs to be backed out:
+```bash
+# Discard uncommitted changes or revert commit
+git checkout HEAD -- src/server/db/contest-schema.ts src/server/trpc/routers/contest.ts src/app/dashboard/contests/[id]/page.tsx src/app/dashboard/page.tsx
+rm -f src/lib/language-map.ts src/components/contests/student-submissions-drawer.tsx src/app/dashboard/contests/submissions/page.tsx
+
+# Verify build
+pnpm exec tsc --noEmit
+```
+
+### Recipe F: Revert Post-Contest Student Submissions Review
+If the student review workspace and results time-lock feature needs to be backed out:
+```bash
+# Discard changes to router and results page
+git checkout HEAD -- src/server/trpc/routers/contest.ts src/app/contest/[code]/results/page.tsx
+rm -rf src/app/contest/[code]/review
+
+# Verify build
+pnpm exec tsc --noEmit
+```
+
 ---
 
 ## 3. Post-Revert Verification Checklist
