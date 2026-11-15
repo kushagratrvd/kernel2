@@ -8,6 +8,17 @@
 
 ## 2026-11-15
 
+### [2026-11-15] Decision: Option B (Spring Boot Backend Server-to-Server Integration with API Key Auth) over Option A (Direct Frontend React-to-Kernel Axios Calls) for CareerForge contest integration because server-to-server calls keep the API secret completely hidden from browser DevTools, prevent student identity/email spoofing (IDOR) by extracting verified email from CareerForge JWT, eliminate CORS vulnerabilities, and enable backend caching to protect Kernel from simultaneous student load.
+
+- **Model**: Antigravity (Gemini 2.5 Pro)
+- **Status**: IMPLEMENTED.
+- **Decision Made**: Expose protected REST Route Handlers (`/api/v1/contests`, `/api/v1/contests/:code/leaderboard`, `/api/v1/students/:email/contests`) in Kernel Next.js App Router guarded by `X-Kernel-Api-Key` middleware. CareerForge's Spring Boot backend consumes these endpoints server-to-server and presents safe, cached proxies to the CareerForge React frontend.
+- **Alternatives Considered**:
+  1. Option A (Direct Frontend Integration): CareerForge React frontend calling Kernel REST API directly — rejected because API key is exposed in browser bundles/DevTools network tab, students can tamper with the `{email}` path parameter to inspect other students' scores (IDOR), and 500 concurrent students refreshing leaderboards directly hammer Kernel's database.
+  2. Public unauthenticated REST endpoints — rejected because contest scorecards, participants, and leaderboards are sensitive academic records requiring authenticated cross-platform trust.
+  3. Reusing tRPC for cross-platform integration — rejected because CareerForge backend is written in Java (Spring Boot 3.3.x) which natively consumes standard REST/JSON endpoints rather than tRPC batch RPC specifications.
+- **Concrete Reason**: Option B provides complete cryptographic isolation of secrets, guarantees student identity integrity via CareerForge's existing JWT `UserPrincipal`, bypasses browser CORS constraints, and allows Spring Boot to throttle/cache leaderboard data.
+
 ### [2026-11-15] Decision: Student Contest Hub (`/contest`) with past participated contests and 'Enter Contest Code' modal over public live contest listings because contests are invitation-only classroom events where live exams should not be publicly discoverable without an authorized passcode, and students need a persistent portal to track past contest results, view holding statuses, and launch Monaco solution reviews.
 
 - **Model**: User (Kushagra) + Antigravity (Gemini 3.8 Flash)

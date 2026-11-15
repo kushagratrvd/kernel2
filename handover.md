@@ -11,18 +11,34 @@
 
 ## 1. 5-Line Session Summary (Current Session)
 
-- What was done: Built Student Contest Hub (`/contest`) with past participated contests cards, time-locked scores/ranks, and "Enter Contest Code" Base UI `<Dialog>` modal. Added `getStudentPastContests` TRPC query with PostgreSQL server time-locks. Fixed `getStudentReview` executionResult key mismatch (`details` vs `testCases`) that caused passed sample test cases to show "Wrong Answer". Made Monaco editor and console adaptive between light/dark themes.
-- What was committed: Committed and pushed to origin/master.
-- Build state: Verified `pnpm exec tsc --noEmit` with 0 type errors.
-- What's left: User testing of student contest hub and enter code modal.
-- What to watch out for: Live contests are accessible only by entering the code (not listed publicly). For past contests that are still live, scores and ranks remain strictly masked (`NOW() >= contest.endTime`).
+- What was done: Built end-to-end integration between CareerForge (`D:\careerforge-repo`) and Kernel (`D:\kernel2`). Created Spring Boot `KernelContestService` and `ExternalContestController` with JWT email security, and built CareerForge React `ContestsPage` with contest explorer, live pulses, student scorecards, and official leaderboard modal with anti-cheat time-locks.
+- What was committed: Pending commit.
+- Build state: Verified all builds (Kernel: `tsc` 0 errors; CareerForge backend: `mvn test-compile` BUILD SUCCESS; CareerForge frontend: `vite build` 0 errors).
+- What's left: User browser smoke test on localhost:8082 and localhost:3000.
+- What to watch out for: For local dev, CareerForge backend expects Kernel running at `http://localhost:3000` with `X-Kernel-Api-Key: kernel_secret_key_2026`.
 
 ---
 
 ## 2. What is Fully Done & Stable until last session (replaced every important session)
 
+- **CareerForge Cross-Platform Integration (Full-Stack)**:
+  - **Kernel REST API (`src/app/api/v1/...`)**:
+    - `src/server/api-key-auth.ts`: Middleware validating `X-Kernel-Api-Key` or `Authorization: Bearer <key>`.
+    - `src/app/api/v1/contests/route.ts`: Exposes active, upcoming, and past contests with DB time calculation.
+    - `src/app/api/v1/contests/[code]/leaderboard/route.ts`: Exposes contest leaderboard with DB clock time-lock.
+    - `src/app/api/v1/students/[email]/contests/route.ts`: Resolves student by email, returns scorecards with live score masking.
+  - **CareerForge Spring Boot Backend (`careerforge`)**:
+    - `KernelContestService.java`: `RestClient` calling Kernel with `X-Kernel-Api-Key` header.
+    - `ExternalContestController.java`: Endpoints `/api/student/contests`, `/api/student/contests/{code}/leaderboard`, and `/api/student/contests/my-history` extracting verified student email from JWT `UserPrincipal`.
+    - `SecurityConfig.java`: Configured permissions for `/api/student/contests/**` for `STUDENT` and `ADMIN`.
+    - `application.yml`: Configured `kernel.api.url` and `kernel.api.key`.
+  - **CareerForge React Frontend (`careerforge-frontend`)**:
+    - `src/services/contestService.ts`: Types and API client methods for contests, leaderboards, and scorecards.
+    - `src/pages/ContestsPage.tsx`: Contest explorer with status filters, live contest pulses, student scorecard history with ranks, and official leaderboard modal with time-lock screens.
+    - `src/routes/AppRoutes.tsx`: Registered `/student/contests` and `/admin/contests` routes.
+    - `src/layouts/StudentLayout.tsx` & `AdminLayout.tsx`: Replaced external URL with internal in-app navigation.
 - **Post-Contest Student Submissions Review & Result Time-Lock**:
-  - Authoritative DB Clock: Centralized SQL-level check `isContestEndedDb` using `sql<boolean>NOW() >= ${contest.endTime}` in `getResults`, `getStudentReview`, and `finishAttempt`, preventing server clock skew.
+  - Authoritative DB Clock: Centralized SQL-level check `isContestEndedDb` using `sql<boolean>`NOW() >= ${contest.endTime}` in `getResults`, `getStudentReview`, and `finishAttempt`, preventing server clock skew.
   - Security Leak Plugs:
     - `getByCode`: Removed `correctOption: content.correctOptionId` (prevented MCQ answer key leak) and sanitized `participation.submissions` (masks MCQ score/correctness during live attempts).
     - `submitMcqOrTextAnswer`: Sanitized return value to `{ success: true, id, contestQuestionId, savedAt }` (prevented live MCQ brute forcing).
@@ -51,7 +67,19 @@
 
 ## 3. What is Currently in Progress (this always shows current session progress and is replaced not incrementally updated)
 
-- None. All tasks for Post-Contest Student Submissions Review and Result Time-Lock are completed and verified.
+- None. All tasks for CareerForge full-stack integration and Kernel REST endpoints are completed and verified across all test builds.
+
+---
+
+## 4. Previous Session Summaries
+
+### Session: 2026-11-15 (Student Contest Hub & Monaco Review Mode)
+
+- What was done: Built Student Contest Hub (`/contest`) with past participated contests cards, time-locked scores/ranks, and "Enter Contest Code" Base UI `<Dialog>` modal. Added `getStudentPastContests` TRPC query with PostgreSQL server time-locks. Fixed `getStudentReview` executionResult key mismatch (`details` vs `testCases`) that caused passed sample test cases to show "Wrong Answer". Made Monaco editor and console adaptive between light/dark themes.
+- What was committed: Committed in `9ec1cff`.
+- Build state: Verified `pnpm exec tsc --noEmit` with 0 type errors.
+- What's left: User testing of student contest hub and enter code modal.
+- What to watch out for: Live contests are accessible only by entering the code (not listed publicly). For past contests that are still live, scores and ranks remain strictly masked (`NOW() >= contest.endTime`).
 
 ---
 

@@ -106,3 +106,48 @@
     - Code: Read-only Monaco editor showing strict final submitted code, language tag, reconciliation banner if best score > final score, sample test cases, failed private test case diagnostics, and masked passed private test cases.
 - **Verification**:
   - `pnpm exec tsc --noEmit` executed: **0 errors** (Clean build).
+
+---
+
+# Feature Trace: Cross-Platform REST API Integration (CareerForge <-> Kernel)
+
+> Integration endpoints allowing CareerForge (`D:\careerforge-repo`) to securely consume Kernel's contests, leaderboards, and student scorecards server-to-server.
+
+---
+
+## 1. Feature Scoping & Context
+- **Problem Statement**: CareerForge students and faculty needed to track coding contest performance and view leaderboards inside the CareerForge platform. Kernel's contest runner and scorecard engine needed to expose secure, production-grade endpoints for CareerForge without exposing database credentials, client API keys, or leaking live exam solutions.
+- **Goals**:
+  1. Build header-based API key guard (`authenticateApiKey`) verifying `X-Kernel-Api-Key` or `Authorization: Bearer <key>`.
+  2. Implement `GET /api/v1/contests` to return active, upcoming, and past contests with PostgreSQL server clock status flags.
+  3. Implement `GET /api/v1/contests/:code/leaderboard` with anti-cheating time-lock: when contest is live (`NOW() < endTime`), returns `timeLocked: true` with masked leaderboard; once concluded, returns ranked participants with scores and percentages.
+  4. Implement `GET /api/v1/students/:email/contests` identifying students by unique `email`, returning historical contest scorecards, ranks, and participant totals, strictly masking active contest scores.
+  5. Verify zero TypeScript errors and test live endpoints with curl.
+
+---
+
+## 2. Implementation Steps
+- [x] Step 1: Create API Key Authentication Guard (`src/server/api-key-auth.ts`).
+- [x] Step 2: Implement Contests Feed Route Handler (`src/app/api/v1/contests/route.ts`).
+- [x] Step 3: Implement Contest Leaderboard Route Handler (`src/app/api/v1/contests/[code]/leaderboard/route.ts`).
+- [x] Step 4: Implement Student Contests Scorecard Route Handler (`src/app/api/v1/students/[email]/contests/route.ts`).
+- [x] Step 5: TypeScript build verification (`pnpm exec tsc --noEmit` -> 0 errors).
+- [x] Step 6: Live HTTP endpoint testing with curl (tested 401 unauth, 200 contests feed, time-locked live leaderboard, concluded leaderboard, and student scorecards).
+
+---
+
+## 3. Log of Changes & Verification
+- **Files Created**:
+  - `src/server/api-key-auth.ts`: Middleware checking `x-kernel-api-key` against `process.env.KERNEL_API_KEY || "kernel_secret_key_2026"`. Returns 401 JSON error on failure.
+  - `src/app/api/v1/contests/route.ts`: Exposes contest listing with `status` filter ("all", "live", "past", "upcoming") and authoritative DB clock expressions (`NOW() >= endTime`).
+  - `src/app/api/v1/contests/[code]/leaderboard/route.ts`: Lookups contest by code case-insensitively. Strictly enforces `timeLocked: true` when `NOW() < endTime`. Once concluded, returns ranked student list with scores, durations, and percentages.
+  - `src/app/api/v1/students/[email]/contests/route.ts`: Looks up student by email, queries all participations, calculates `CONCLUDED` vs `RESULTS_PENDING` vs `IN_PROGRESS` vs `TIMED_OUT`, counts participants per contest, and masks scores during live contests.
+- **Verification**:
+  - `pnpm exec tsc --noEmit` passed with 0 errors.
+  - Curl test without API key: returned HTTP `401 Unauthorized`.
+  - Curl test on `/api/v1/contests`: returned 6 contests with accurate `LIVE` and `CONCLUDED` statuses.
+  - Curl test on `/api/v1/contests/TODAY/leaderboard`: returned `timeLocked: true` with masked leaderboard (live contest).
+  - Curl test on `/api/v1/contests/KRN101/leaderboard`: returned `timeLocked: false` with ranked participants and scores (concluded contest).
+  - Curl test on `/api/v1/students/student@kernel.dev/contests`: returned 2 participations (TODAY masked as `RESULTS_PENDING`, KRN101 revealed as `CONCLUDED`).
+  - Curl test on non-existent student: returned HTTP 200 with `found: false` and `participations: []`.
+

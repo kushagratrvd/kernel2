@@ -515,5 +515,54 @@
 - **Functions Called**:
   - `trpc.contest.getStudentPastContests`: Enforces authoritative DB time-lock (`NOW() >= contest.endTime`) to sanitize scores and prevent score leaks during live contests while presenting a comprehensive dashboard of completed and ongoing exams.
 
+---
+
+## 11. External Platform Integration Flow (CareerForge <-> Kernel)
+
+```
+[ CareerForge Student Browser ]
+             │
+             │  1. Requests contest leaderboard or my scorecards
+             │     with CareerForge JWT Bearer token
+             ▼
+[ CareerForge Spring Boot Backend ]
+             │
+             │  2. Authenticates JWT, extracts verified userPrincipal.getEmail()
+             │  3. Injects server-to-server secret header: X-Kernel-Api-Key: <SECRET>
+             │  4. HTTP GET to Kernel REST API
+             ▼
+[ Kernel Next.js App Router REST API ]
+   ├── /api/v1/contests
+   ├── /api/v1/contests/:code/leaderboard
+   └── /api/v1/students/:email/contests
+             │
+             │  5. authenticateApiKey(request) verifies X-Kernel-Api-Key
+             │  6. Database Query with PostgreSQL server clock time-lock:
+             │     - NOW() >= contest.endTime (isEnded)
+             │     - NOW() >= contest.startTime AND NOW() < contest.endTime (isLive)
+             ▼
+[ Kernel Neon PostgreSQL DB ]
+             │
+             │  7. Returns sanitized JSON payload:
+             │     - If contest is LIVE: timeLocked=true, score=null, rank=null, leaderboard=[]
+             │     - If contest CONCLUDED: timeLocked=false, score, rank, full leaderboard
+             ▼
+[ CareerForge Spring Boot Backend ]
+             │  8. (Optional) Caches leaderboard in memory/Redis
+             ▼
+[ CareerForge Student UI ] (Renders Contest Leaderboard / Student Scorecard)
+```
+
+- **Entry Points**:
+  - [`src/server/api-key-auth.ts`](file:///d:/kernel2/src/server/api-key-auth.ts) (API Key Auth middleware)
+  - [`src/app/api/v1/contests/route.ts`](file:///d:/kernel2/src/app/api/v1/contests/route.ts)
+  - [`src/app/api/v1/contests/[code]/leaderboard/route.ts`](file:///d:/kernel2/src/app/api/v1/contests/[code]/leaderboard/route.ts)
+  - [`src/app/api/v1/students/[email]/contests/route.ts`](file:///d:/kernel2/src/app/api/v1/students/[email]/contests/route.ts)
+- **Security Invariant**:
+  - API secret key is never sent to the browser.
+  - Student identity is cryptographically anchored to CareerForge's JWT token, completely preventing email tampering (IDOR).
+  - PostgreSQL server clock (`NOW() >= endTime`) strictly time-locks scores and leaderboards for ongoing exams.
+
+
 
 

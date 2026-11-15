@@ -4,6 +4,29 @@
 
 ---
 
+# [EXECUTED] Implementation Plan: Cross-Platform REST API Integration (CareerForge <-> Kernel)
+
+### Context & Goal
+CareerForge (`D:\careerforge-repo`) requires contest leaderboard and student performance data from Kernel (`D:\kernel2`). To guarantee secret isolation, avoid student email impersonation (IDOR), and eliminate CORS issues, the integration uses Option B (Spring Boot Backend Integration calling Kernel REST endpoints server-to-server).
+
+This plan implements on Kernel:
+1. **API Key Security Middleware (`src/server/api-key-auth.ts`)**:
+   - Inspects `X-Kernel-Api-Key` or `Authorization: Bearer <key>` against `KERNEL_API_KEY`.
+   - Returns 401 Unauthorized with descriptive JSON error on mismatch.
+2. **Contest Feed Route Handler (`GET /api/v1/contests`)**:
+   - Lists contests filtered by status (`all`, `live`, `past`, `upcoming`).
+   - Uses authoritative DB expressions (`NOW() >= endTime`, `NOW() >= startTime AND NOW() < endTime`).
+3. **Contest Leaderboard Route Handler (`GET /api/v1/contests/:code/leaderboard`)**:
+   - Time-locks active contests (`timeLocked: true`, masked leaderboard).
+   - Once concluded (`NOW() >= endTime`), returns ranked participant list with scores and durations.
+4. **Student Scorecards Route Handler (`GET /api/v1/students/:email/contests`)**:
+   - Resolves student by unique `email`.
+   - Returns all historical contest participations with status (`CONCLUDED`, `RESULTS_PENDING`, `IN_PROGRESS`, `TIMED_OUT`).
+   - Masks scores/ranks for active contests.
+   - Returns clean 200 with `found: false` if student hasn't taken a Kernel contest yet.
+
+---
+
 # [EXECUTED] Implementation Plan: Student Contest Hub & Earlier Participated Contests View
 
 ### Context & Goal

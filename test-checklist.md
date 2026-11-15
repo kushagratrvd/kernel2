@@ -277,3 +277,54 @@
   3. **Empty State**:
      - For students with 0 past participations, displays a friendly empty state card with an "Enter Contest Code" button.
 
+---
+
+## 8. External REST API Integration (CareerForge <-> Kernel)
+
+### Test 8.1: API Key Guard & Unauthorized Access
+- **Command**:
+  ```bash
+  curl -i http://localhost:3000/api/v1/contests
+  ```
+- **Expected Exit Code**: `0`
+- **Expected HTTP Status**: `401 Unauthorized`
+- **Expected Output JSON**: `{"success":false,"error":"Unauthorized: Invalid or missing X-Kernel-Api-Key header"}`
+
+### Test 8.2: Contests Feed (`GET /api/v1/contests`)
+- **Command**:
+  ```bash
+  curl -s -H "X-Kernel-Api-Key: kernel_secret_key_2026" http://localhost:3000/api/v1/contests
+  ```
+- **Expected Exit Code**: `0`
+- **Expected HTTP Status**: `200 OK`
+- **Expected Response**: JSON object with `success: true`, `count >= 1`, and array of contest summaries with `status` ("LIVE", "CONCLUDED", "UPCOMING").
+
+### Test 8.3: Contest Leaderboard Time-Lock (`GET /api/v1/contests/:code/leaderboard`)
+- **Action (Live Contest)**: Call `/api/v1/contests/TODAY/leaderboard` when contest `TODAY` is live (`NOW() < endTime`).
+- **Expected Response**:
+  ```json
+  {
+    "success": true,
+    "timeLocked": true,
+    "message": "Contest is still ongoing. The official leaderboard will be released once the contest concludes at ...",
+    "leaderboard": []
+  }
+  ```
+- **Action (Concluded Contest)**: Call `/api/v1/contests/KRN101/leaderboard` for concluded contest `KRN101`.
+- **Expected Response**:
+  - `success: true`
+  - `timeLocked: false`
+  - `totalParticipants >= 1`
+  - `leaderboard`: Array of student records sorted by `rank`, with `studentName`, `studentEmail`, `score`, `maxScore`, and `durationMinutes`.
+
+### Test 8.4: Student Scorecards & Contests History (`GET /api/v1/students/:email/contests`)
+- **Action (Active Student)**: Call `/api/v1/students/student@kernel.dev/contests`.
+- **Expected Response**:
+  - `success: true`, `found: true`.
+  - Concluded contests return `status: "CONCLUDED"`, with real `score` and `rank`.
+  - Active contests return `status: "RESULTS_PENDING"`, with `score: null` and `rank: null`.
+- **Action (Non-existent Student)**: Call `/api/v1/students/unknown@careerforge.com/contests`.
+- **Expected Response**:
+  - `success: true`, `found: false`, `student: null`, `participations: []` (clean HTTP 200).
+
+

@@ -8,6 +8,7 @@
 
 | Commit Hash | Commit Message | Verified State |
 | :--- | :--- | :--- |
+| `9ec1cff` | `feat: student contest hub, post-contest review mode, adaptive monaco themes, and admin live submissions monitoring` | Student contest hub, Monaco review, adaptive themes, admin live feed. |
 | `b42d601` | `feat: admin direct question approval with immutable snapshot minting and assignment cancel-and-create pattern` | Admin direct approval live; immutable version snapshot minting; 0 tsc errors. |
 | `50582fc` | `feat: restrict contests access and visibility exclusively to admin` | Contests completely restricted to Admin. `pnpm tsc` clean. |
 | `251ef29` | `refactor: extract QuestionStatusBadge and ReviewDiscussionThread into reusable components` | Shared components extracted with zero styling drift. |
@@ -96,6 +97,17 @@ If the student review workspace and results time-lock feature needs to be backed
 # Discard changes to router and results page
 git checkout HEAD -- src/server/trpc/routers/contest.ts src/app/contest/[code]/results/page.tsx
 rm -rf src/app/contest/[code]/review
+
+# Verify build
+pnpm exec tsc --noEmit
+```
+
+### Recipe G: Revert CareerForge External REST Integration Endpoints
+If the REST integration route handlers need to be removed:
+```bash
+# Remove integration routes and auth guard
+rm -rf src/app/api/v1
+rm -f src/server/api-key-auth.ts
 
 # Verify build
 pnpm exec tsc --noEmit
